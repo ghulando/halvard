@@ -59,7 +59,11 @@ export function changedFiles(worktree: string, base: string) {
   return [
     ...new Set(
       [
-        ...gitRunner(worktree, ['diff', '--name-only', '-z', base, '--']).split('\0'),
+        // Without rename detection a move lists its old path too, so a file moved out of a
+        // risk path or a job's scope still counts there.
+        ...gitRunner(worktree, ['diff', '--name-only', '--no-renames', '-z', base, '--']).split(
+          '\0',
+        ),
         ...gitRunner(worktree, ['ls-files', '--others', '--exclude-standard', '-z']).split('\0'),
       ].filter(Boolean),
     ),
@@ -71,6 +75,12 @@ export function riskLevel(files: string[], riskPaths: string[]) {
   return { level: risky.length ? ('high' as const) : ('normal' as const), risky };
 }
 
+export interface HoldoutResult {
+  name: string;
+  passed: boolean;
+  blocking: boolean;
+}
+
 export interface Evidence {
   job: FactoryJob;
   base: string;
@@ -79,10 +89,22 @@ export interface Evidence {
   files: string[];
   diffStat: string;
   risk: { level: 'high' | 'normal'; risky: string[] };
+  holdout: HoldoutResult[];
+  change: { class: string | null; lines: number; firstTry: boolean };
 }
 
 // The pull request body: what was asked, what checked it, and what a reviewer should read.
-export function evidenceMarkdown({ job, base, gate, review, files, diffStat, risk }: Evidence) {
+export function evidenceMarkdown({
+  job,
+  base,
+  gate,
+  review,
+  files,
+  diffStat,
+  risk,
+  holdout,
+  change,
+}: Evidence) {
   const findings = review.findings.length
     ? review.findings.map((f) => `- ${f.severity} at \`${f.location}\`: ${f.problem}`).join('\n')
     : '- None.';
@@ -119,9 +141,22 @@ export function evidenceMarkdown({ job, base, gate, review, files, diffStat, ris
     '',
     '</details>',
     '',
+    ...(holdout.length
+      ? [
+          '## Holdout checks',
+          '',
+          'Checks kept outside the repository, run by the runner after the gate. Their output stays with the runner.',
+          '',
+          ...holdout.map(
+            (check) =>
+              `- ${check.name}: ${check.passed ? 'passed' : 'failed'}${check.blocking ? '' : ' (not blocking)'}`,
+          ),
+          '',
+        ]
+      : []),
     '## Change',
     '',
-    `Base \`${base}\`. Risk: **${risk.level}**${risk.risky.length ? `; touches ${risk.risky.map((file) => `\`${file}\``).join(', ')}` : ''}.`,
+    `Base \`${base}\`. Risk: **${risk.level}**${risk.risky.length ? `; touches ${risk.risky.map((file) => `\`${file}\``).join(', ')}` : ''}. Class: ${change.class ? `\`${change.class}\`` : 'none'}; ${Number.isFinite(change.lines) ? `${change.lines} lines` : 'binary files'}; ${change.firstTry ? 'gate and review passed first time' : 'needed fixes'}.`,
     '',
     '```',
     diffStat.trim() || `${files.length} files`,

@@ -163,6 +163,43 @@ export interface FactoryConfig {
   // When set, every job gets its own clone, and agents, setup, the gate and the review run
   // in containers of this image.
   container: ContainerConfig | null;
+  // Checks kept outside the repository that the runner runs after the gate passes.
+  holdout: HoldoutCheck[];
+  autoMerge: AutoMergeConfig;
+  // A weekly digest of review findings and parked jobs becomes a job that edits guidance.
+  retro: RetroConfig | null;
+}
+
+export interface HoldoutCheck {
+  name: string;
+  // A host folder the check reads its scenarios from; the agent's container never mounts it.
+  dir: string;
+  command: string[];
+  // The share of jobs the check runs on, chosen from the job id so a retry runs the same set.
+  sample: number;
+  // A failed blocking check parks the job; any other result goes into the evidence.
+  blocking: boolean;
+}
+
+export interface AutoMergeConfig {
+  // Off by default; the repository variable FACTORY_AUTOMERGE must also read on.
+  enabled: boolean;
+  // Change classes by path pattern; a pull request is in a class when every file matches it.
+  classes: Record<string, string[]>;
+  // Track record a class needs: merged pull requests, and the share of them no human edited.
+  minPrs: number;
+  minCleanRate: number;
+  maxLines: number;
+  // No revert of a pull request in the class within this many days.
+  windowDays: number;
+  // Check names that must have succeeded; any check, so a bot's quick success is not enough.
+  requiredChecks: string[];
+}
+
+export interface RetroConfig {
+  everyDays: number;
+  // The only files a retro job may change.
+  paths: string[];
 }
 
 export interface ContainerConfig {
@@ -219,6 +256,8 @@ export interface FactoryJob {
   parked: { reason: string; detail: string; at?: string } | null;
   // The frozen acceptance tests: their folder and a digest of every file in it.
   tests?: { dir: string; digest: string } | null;
+  // Files the job may change besides its task file; set for retro jobs.
+  scope?: string[] | null;
   pr: string | null;
   costUsd: number;
   created: string;

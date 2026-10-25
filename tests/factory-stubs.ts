@@ -39,6 +39,16 @@ if (a === 'issue' && b === 'list') {
 } else if (a === 'api' && args.some((arg) => /\\/permission$/.test(arg))) {
   const login = args.find((arg) => /\\/permission$/.test(arg)).match(/collaborators\\/([^/]+)\\/permission/)[1];
   process.stdout.write((state.permissions[login] || 'none') + '\\n');
+} else if (a === 'pr' && b === 'view') {
+  const view = (state.views || {})[c] || fail('no pull request ' + c);
+  process.stdout.write(JSON.stringify(view));
+} else if (a === 'pr' && b === 'merge') {
+  (state.merges ??= []).push(args);
+  save();
+} else if (a === 'variable' && b === 'get') {
+  const value = (state.variables || {})[c];
+  if (value === undefined) fail('variable ' + c + ' was not found');
+  process.stdout.write(value + '\\n');
 } else if (a === 'pr' && b === 'create') {
   const url = 'https://github.com/example/repo/pull/' + (state.prs.length + 1);
   state.prs.push({ args, url });
@@ -88,6 +98,9 @@ export interface GithubState {
   permissions: Record<string, string>;
   comments: { issue: number; body: string }[];
   prs: { args: string[]; url: string }[];
+  views?: Record<string, unknown>;
+  variables?: Record<string, string>;
+  merges?: string[][];
 }
 
 // Read and change the gh stub's state. label() adds a label and its event, as GitHub would.
@@ -266,7 +279,9 @@ if (process.env.STUB_AGENT === 'blocked') {
   process.stdout.write(JSON.stringify({ result: 'STATUS: BLOCKED: the brief contradicts itself', total_cost_usd: 0.02, is_error: false }));
   process.exit(0);
 }
-fs.appendFileSync(path.join(process.cwd(), 'source.txt'), 'implemented\\n');
+const target = path.join(process.cwd(), process.env.STUB_FILE || 'source.txt');
+fs.mkdirSync(path.dirname(target), { recursive: true });
+fs.appendFileSync(target, 'implemented\\n');
 process.stdout.write(JSON.stringify({ result: 'Done.\\nSTATUS: READY', total_cost_usd: 0.25, is_error: false }));
 `;
   for (const name of ['claude', 'grok', 'cursor-agent']) {

@@ -2,6 +2,7 @@ import type { FactoryJob } from './types.ts';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { jobFile, listJobs, repoHome } from './factory-store.ts';
+import { classRates, trackedJobs } from './factory-outcomes.ts';
 
 interface Event {
   at: string;
@@ -76,6 +77,10 @@ export function metrics(root: string, now = new Date()) {
     }
   }
   hours.sort((a, b) => a - b);
+  // Outcomes as factory serve or factory automerge last fetched them; no GitHub call here.
+  const classes = classRates(trackedJobs(root));
+  const merged = Object.values(classes).reduce((sum, row) => sum + row.merged, 0);
+  const edited = Object.values(classes).reduce((sum, row) => sum + row.humanEdited, 0);
   return {
     jobs: jobs.length,
     stages,
@@ -91,6 +96,9 @@ export function metrics(root: string, now = new Date()) {
       ? Math.round(hours[Math.floor(hours.length / 2)]! * 10) / 10
       : null,
     monthSpendUsd: Math.round(monthSpend(root, now) * 100) / 100,
+    mergedPullRequests: merged,
+    humanEditRate: rate(edited, merged),
+    humanEditRateByClass: classes,
   };
 }
 
@@ -143,6 +151,7 @@ export function boardHtml(root: string, now = new Date()) {
       numbers.meanCostPerFinishedUsd === null ? 'n/a' : `$${numbers.meanCostPerFinishedUsd}`,
     ],
     ['Spent this month', `$${numbers.monthSpendUsd}`],
+    ['Human edits after merge', percent(numbers.humanEditRate)],
   ];
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

@@ -1,9 +1,12 @@
 import type {
+  AutoMergeConfig,
   ContainerConfig,
   FactoryConfig,
   FlowConfig,
   Harness,
+  HoldoutCheck,
   ReadCommand,
+  RetroConfig,
   TeamConfig,
 } from './types.ts';
 import { HARNESSES } from './types.ts';
@@ -339,6 +342,11 @@ const RISK_PATHS = [
   '.cursor/**',
   '.agents/**',
   '.pi/**',
+  // Guidance every later agent and reviewer reads.
+  'AGENTS.md',
+  'CLAUDE.md',
+  '**/AGENTS.md',
+  '**/CLAUDE.md',
 ];
 
 const argv = (value: unknown, name: string) => {
@@ -381,6 +389,9 @@ export function factoryConfig(input: unknown): FactoryConfig {
     'tests',
     'concurrency',
     'container',
+    'holdout',
+    'autoMerge',
+    'retro',
   ];
   for (const key of Object.keys(value)) {
     if (!keys.includes(key)) throw new Error(`unknown factory option: ${key}`);
@@ -501,6 +512,15 @@ export function factoryConfig(input: unknown): FactoryConfig {
     value.container === undefined || value.container === null
       ? null
       : containerConfig(value.container);
+  const autoMerge = autoMergeConfig(value.autoMerge);
+  // Without containers the agent runs as you and could rewrite what the runner recorded.
+  if (autoMerge.enabled && !container) {
+    throw new Error('factory autoMerge needs container mode before it may merge');
+  }
+  if (autoMerge.enabled && !autoMerge.requiredChecks.length) {
+    throw new Error('factory autoMerge needs requiredChecks before it may merge');
+  }
+  const retro = value.retro === undefined || value.retro === null ? null : retroConfig(value.retro);
   return {
     author,
     reviewers: reviewers as string[],
@@ -514,12 +534,135 @@ export function factoryConfig(input: unknown): FactoryConfig {
     budgetUsd,
     maxFixPasses: maxFixPasses as number,
     draft,
-    riskPaths: [...new Set([...RISK_PATHS, ...(riskPaths as string[])])],
+    // What a retro may change is guidance, so a person always reads it.
+    riskPaths: [...new Set([...RISK_PATHS, ...(riskPaths as string[]), ...(retro?.paths ?? [])])],
     monthlyUsd,
     pollSeconds: pollSeconds as number,
     tests,
     concurrency: concurrency as number,
     container,
+    holdout: holdoutChecks(value.holdout),
+    autoMerge,
+    retro,
+  };
+}
+
+const relativePatterns = (value: unknown, name: string) => {
+  if (
+    !Array.isArray(value) ||
+    !value.length ||
+    value.some(
+      (path) =>
+        typeof path !== 'string' || !path || path.startsWith('/') || path.split('/').includes('..'),
+    )
+  ) {
+    throw new Error(`factory ${name} must list repo-relative patterns`);
+  }
+  return value as string[];
+};
+
+const object = (value: unknown, name: string, keys: string[]) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`factory ${name} must be an object`);
+  }
+  for (const key of Object.keys(value)) {
+    if (!keys.includes(key)) throw new Error(`unknown factory ${name} option: ${key}`);
+  }
+  return value as Record<string, unknown>;
+};
+
+const NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+function holdoutChecks(input: unknown): HoldoutCheck[] {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input)) throw new Error('factory holdout must be a list of checks');
+  const checks = input.map((entry) => {
+    const value = object(entry, 'holdout', ['name', 'dir', 'command', 'sample', 'blocking']);
+    if (typeof value.name !== 'string' || !NAME.test(value.name)) {
+      throw new Error('factory holdout name must be a short lowercase slug');
+    }
+    // The scenarios live outside the repository, so the builder never finds them in the tree.
+    if (typeof value.dir !== 'string' || !absolute(value.dir)) {
+      throw new Error(`factory holdout ${value.name} needs dir, an absolute host folder`);
+    }
+    const sample = value.sample ?? 1;
+    if (typeof sample !== 'number' || !(sample > 0) || sample > 1) {
+      throw new Error(`factory holdout ${value.name} sample must be above 0 and at most 1`);
+    }
+    const blocking = value.blocking ?? true;
+    if (typeof blocking !== 'boolean') {
+      throw new Error(`factory holdout ${value.name} blocking must be true or false`);
+    }
+    return {
+      name: value.name,
+      dir: value.dir.replace(/(?<=.)\/+$/, ''),
+      command: argv(value.command, `holdout ${value.name} command`),
+      sample,
+      blocking,
+    };
+  });
+  if (new Set(checks.map((check) => check.name)).size !== checks.length) {
+    throw new Error('factory holdout names must be distinct');
+  }
+  return checks;
+}
+
+const bounded = (value: unknown, name: string, low: number, high: number) => {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < low || value > high) {
+    throw new Error(`factory ${name} must be ${low}..${high}`);
+  }
+  return value;
+};
+
+function autoMergeConfig(input: unknown): AutoMergeConfig {
+  const value = object(input ?? {}, 'autoMerge', [
+    'enabled',
+    'classes',
+    'minPrs',
+    'minCleanRate',
+    'maxLines',
+    'windowDays',
+    'requiredChecks',
+  ]);
+  const enabled = value.enabled ?? false;
+  if (typeof enabled !== 'boolean')
+    throw new Error('factory autoMerge enabled must be true or false');
+  const raw = value.classes ?? {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('factory autoMerge classes must map class names to patterns');
+  }
+  const classes = Object.fromEntries(
+    Object.entries(raw).map(([name, patterns]) => {
+      if (!NAME.test(name)) throw new Error(`factory autoMerge class ${name} needs a slug name`);
+      return [name, relativePatterns(patterns, `autoMerge class ${name}`)];
+    }),
+  );
+  return {
+    enabled,
+    classes,
+    minPrs: bounded(value.minPrs ?? 30, 'autoMerge minPrs', 1, 1000),
+    minCleanRate: bounded(value.minCleanRate ?? 95, 'autoMerge minCleanRate', 50, 100),
+    maxLines: bounded(value.maxLines ?? 200, 'autoMerge maxLines', 1, 5000),
+    windowDays: bounded(value.windowDays ?? 30, 'autoMerge windowDays', 1, 365),
+    requiredChecks: checkNames(value.requiredChecks ?? []),
+  };
+}
+
+function checkNames(value: unknown) {
+  if (
+    !Array.isArray(value) ||
+    value.some((name) => typeof name !== 'string' || !name.trim() || name.length > 200)
+  ) {
+    throw new Error('factory autoMerge requiredChecks must list check names');
+  }
+  return value as string[];
+}
+
+function retroConfig(input: unknown): RetroConfig {
+  const value = object(input, 'retro', ['everyDays', 'paths']);
+  return {
+    everyDays: bounded(value.everyDays ?? 7, 'retro everyDays', 1, 90),
+    paths: relativePatterns(value.paths ?? ['AGENTS.md', 'skills/**'], 'retro paths'),
   };
 }
 

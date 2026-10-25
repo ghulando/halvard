@@ -62,11 +62,14 @@ Add a `factory` block to `.halvard.json`. Every key is optional:
 | `budgetUsd` | 5 | Total agent spend per job. Claude gets the remainder as `--max-budget-usd`; other hosts report no cost, so only their timeouts apply. |
 | `maxFixPasses` | 2 | Agent runs after the first build that fix a failed gate or a blocked review round 1, 0 to 3. |
 | `draft` | true | Open the pull request as a draft. |
-| `riskPaths` | CI and harness settings | Extra patterns that mark a pull request high risk. CI, `.halvard.json` and the harness settings directories are always included. |
+| `riskPaths` | CI and harness settings | Extra patterns that mark a pull request high risk. CI, `.halvard.json`, the harness settings directories, every `AGENTS.md` and `CLAUDE.md` and the retro's `paths` are always included. |
 | `monthlyUsd` | 200 | Agent spend per calendar month (UTC), summed from the cost each agent run reports. Reviewer runs report no cost, so their spend is not counted. `factory serve` starts no new work, approved builds or retries once 90% of it is spent. |
 | `pollSeconds` | 300 | How often `factory serve` checks GitHub, 60 to 3600 seconds. |
 | `concurrency` | 1 | Jobs `factory serve` works at the same time, 1 to 4. Each starts only after a slot frees and the budget still allows it, so jobs already running can take the month a little past 90%. A pass waits for its jobs before the next poll, so a long job delays new issues and labels until it ends. |
 | `container` | none | Run every step in containers; see [Containers](#containers). |
+| `holdout` | none | Checks kept outside the repository; see [Holdout checks](#holdout-checks). |
+| `autoMerge` | off | Change classes and the rules for merging without a person; see [Auto-merge](#auto-merge). |
+| `retro` | none | A periodic job that turns recurring findings into guidance changes; see [Retro](#retro). |
 | `tests` | none | Frozen acceptance tests. Before the build, the harness named in `by` writes tests for the task's acceptance criteria under `<dir>/<job>/` and nowhere else. The builder must make them pass and may not change them. It must be a different harness from `author`, and your gate must run the tests in that folder. Only that folder is frozen: the builder can still change the test runner's configuration or scripts, so add them to `riskPaths` and read them in the pull request. |
 
 `gh` must be logged in on your machine for issues and pull requests. Without an `origin` remote, the runner builds from the local base branch and only commits.
@@ -89,6 +92,8 @@ halvard factory replan issue-42                 # plan again a job that has no a
 halvard factory serve                           # work labeled issues until Ctrl-C; --once for one pass
 halvard factory board                           # write the HTML board and print its path
 halvard factory metrics
+halvard factory automerge                       # dry run: which pull requests would have merged by themselves
+halvard factory retro --no-push                 # turn recurring findings into a guidance change now
 halvard factory status [issue-42]
 ```
 
@@ -102,9 +107,11 @@ halvard factory status [issue-42]
 2. Parks jobs that wait for approval and whose issue is labeled `factory:stop`. A running job checks for that label before each step.
 3. Builds again, or plans again, a parked job whose issue got `factory:retry` after it parked, or a job whose runner died mid-run.
 4. Builds jobs whose plan got `factory:approved` after it was posted, and approved jobs that no runner is working on.
-5. Claims new open issues labeled `factory`, `priority:high` first, then by number. `factory:small` skips the plan stage, and `bug` gives the branch the fix prefix.
+5. Merges open pull requests that qualify, when [auto-merge](#auto-merge) is on, and fetches what happened to the factory's other pull requests, at most hourly each.
+6. Starts a [retro](#retro) job when one is due.
+7. Claims new open issues labeled `factory`, `priority:high` first, then by number. `factory:small` skips the plan stage, and `bug` gives the branch the fix prefix.
 
-Every label counts only if someone with write access to the repository added it; the runner reads the issue's label events and that person's permission. A triager's label does nothing. Steps 3 to 5 stop once 90% of `monthlyUsd` is spent this month. `serve` regenerates the board after every step. An issue that already has a job under any id is not claimed again. Ctrl-C or SIGTERM parks the current job as `stopped-by-human` and exits; a second Ctrl-C quits at once, even in the middle of the gate. While `serve` works a job, `factory approve` and `build` refuse to start, so approve with the label. `serve` also builds a job you approved with `factory approve`, and it always pushes and opens the pull request; stop `serve` first if you want `factory build --no-push` for that job.
+Every label counts only if someone with write access to the repository added it; the runner reads the issue's label events and that person's permission. A triager's label does nothing. Steps 3, 4, 6 and 7 stop once 90% of `monthlyUsd` is spent this month. `serve` regenerates the board after every step. An issue that already has a job under any id is not claimed again. Ctrl-C or SIGTERM parks the current job as `stopped-by-human` and exits; a second Ctrl-C quits at once, even in the middle of the gate. While `serve` works a job, `factory approve` and `build` refuse to start, so approve with the label. `serve` also builds a job you approved with `factory approve`, and it always pushes and opens the pull request; stop `serve` first if you want `factory build --no-push` for that job.
 
 | Label | Who adds it | Effect |
 | --- | --- | --- |
@@ -201,6 +208,74 @@ Allow the model API hosts of your harnesses and your package registry. Pass `HTT
 | `meanCostPerFinishedUsd` | Mean agent cost of committed and pull-request jobs |
 | `medianHoursToCommit` | Median time from job creation to the runner's commit |
 | `monthSpendUsd` | Agent spend this calendar month |
+| `mergedPullRequests` | Factory pull requests merged so far |
+| `humanEditRate` | Merged factory pull requests a person edited, in percent: a commit on the pull request that the factory did not make, or a commit to the same files on the base within 14 days of the merge, other than a factory merge |
+| `humanEditRateByClass` | The same per [change class](#auto-merge), with merged, edited and reverted counts |
+
+The pull request numbers come from what `factory serve` or `factory automerge` last fetched, so `metrics` and the board never call GitHub.
+
+## Holdout checks
+
+A holdout check is a command whose scenarios live outside the repository, where the builder cannot read or weaken them. The runner runs each one after the gate passes and before the review, in the job's checkout:
+
+```json
+"holdout": [
+  {"name": "scenarios", "dir": "/srv/factory/scenarios", "command": ["/srv/factory/scenarios/run.sh"]},
+  {"name": "mutation", "dir": "/srv/factory/mutation", "command": ["/srv/factory/mutation/run.sh"], "sample": 0.2, "blocking": false}
+]
+```
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `name` | required | A short lowercase name, used in the evidence and the log. |
+| `dir` | required | An absolute host folder with the scenarios. It may not overlap the repository, the factory's folders, your settings or a container mount. |
+| `command` | required | The command, run in the checkout with `HALVARD_HOLDOUT_DIR` set to `dir`, `HALVARD_FACTORY_BASE` to the base commit and `TMPDIR` to a scratch folder. It gets the environment without credentials that setup gets; in container mode only those three variables reach it, not the container's `env` list. |
+| `sample` | 1 | The share of jobs it runs on. The job id decides, so a retry runs the same checks. The choice is predictable from the id, so sampling saves cost; it hides nothing. |
+| `blocking` | true | A failed blocking check parks the job as `holdout-failed`; any other result goes into the pull request evidence. |
+
+The check's output goes to `holdout.log` in the job folder, never to an agent: a failed check parks the job instead of starting a fix pass, because a fix pass would show the builder what the scenarios test. A check may write only to `$TMPDIR`; one that changes the checkout parks the job as `infra`, because the gate and review cover that tree. In container mode the check runs in its own container with no network, the checkout, `dir` and the container's extra `mounts` read-only and only the scratch folder writable, so a check that writes to the checkout fails there and parks the job as `holdout-failed`. Code the builder wrote therefore cannot copy the scenarios where a later fix pass would find them; the agent's container never mounts `dir`. Without containers the agent runs as you and could read the folder, so the scenarios are hidden from its prompt and tree, not from a determined agent.
+
+Sampled checks suit expensive runs such as mutation testing of the changed lines: `HALVARD_FACTORY_BASE` lets the command find them. The engine knows no test tool; the command is yours.
+
+## Auto-merge
+
+A change class is a set of path patterns. When the runner commits, it records the class whose patterns match every changed file, the task file aside, with the number of changed lines and whether the gate and review passed the first time. The evidence shows them.
+
+```json
+"autoMerge": {
+  "enabled": false,
+  "classes": {"docs": ["docs/**"], "tests": ["tests/**"]},
+  "requiredChecks": ["build", "test"],
+  "minPrs": 30,
+  "minCleanRate": 95,
+  "maxLines": 200,
+  "windowDays": 30
+}
+```
+
+A pull request merges without a person only when all of these hold:
+
+- Its files fit a class, it touches no risk path, and it changes at most `maxLines` lines. A moved file counts at its old and its new path. List dependency manifests and lockfiles in `riskPaths`, so a new dependency always reaches a person.
+- The gate and the review passed the first time, with no fix pass, and no holdout check failed.
+- Its CI is green: every check succeeded, every name in `requiredChecks` is among them, and it has at least one.
+- It is not a draft, and its head is still the factory's commit.
+- No person objected: no requested changes, no review other than an approval, and no `factory:stop` label on the pull request or its issue.
+- It is not a retro job. Guidance changes always reach a person.
+- The class has at least `minPrs` factory pull requests that a person merged at least 14 days earlier, at least `minCleanRate` percent of those with no human edits, and no revert in the last `windowDays` days. A revert is a commit on the base whose message says `This reverts commit <merge commit>`. Pull requests that auto-merge merged itself do not count, so the rule never vouches for itself.
+
+`factory automerge` is the dry run. It fetches every factory pull request and prints which merged ones would have qualified at the moment they merged, which open ones qualify now, and the human-edit rate per class. It merges nothing.
+
+Merging needs container mode, because without it the agent runs as you and could change what the runner recorded, a nonempty `requiredChecks`, `"enabled": true` and the repository variable `FACTORY_AUTOMERGE` set to `on`; anything else, including a failed lookup, merges nothing, so `gh variable set FACTORY_AUTOMERGE --body off` stops it at once. `factory serve` then merges a qualifying pull request with `gh pr merge --squash --match-head-commit <factory commit>`, so a push after the check stops the merge. It records an `auto-merge` event; a merge GitHub refuses is tried again an hour later, not on every poll. `requiredChecks` match by name, and a workflow in the pull request itself can post a status under any name, so also protect the base branch with required checks pinned to the app that runs them. Check a sample of merged pull requests by hand each month.
+
+## Retro
+
+```json
+"retro": {"everyDays": 7, "paths": ["AGENTS.md", "skills/**"]}
+```
+
+A retro reads what went wrong since the last one: every review finding, every failed runner gate and every job that parked for a reason other than your stop. When that came from at least two jobs, it creates the job `retro-<date>`, a small job whose brief carries those records as untrusted data. The builder looks for problems that recur in at least two jobs and changes the repository's guidance to prevent them; it may change only files that match `paths`, and a change to anything else parks the job as `out-of-scope`. The change goes through the gate and review and opens a pull request like any other job.
+
+`factory serve` starts a retro once `everyDays` days have passed since the last one. `factory retro` starts one now; `--since <days>` sets how far back it reads.
 
 ## What keeps an unattended run safe
 
@@ -230,6 +305,8 @@ Before you use Grok as the author, run the headless probes from the factory rese
 | `…/brief.md`, `…/plan.md` | The brief and the plan as proposed and approved |
 | `…/agent.log`, `…/runner.log`, `…/setup.log` | Agent output, gate and review output, setup output |
 | `…/evidence.md`, `…/evidence.json` | The pull request body and the receipts behind it |
+| `…/holdout.log` | Output of the holdout checks |
+| `…/outcome.json` | What happened to the pull request: state, CI, human commits, later commits to its files, a revert |
 | `…/stop`, `…/rework-<time>.md` | A stop request from `factory stop`, and your rework notes |
 | `…/state` | Container mode: the gate and review receipts, which only runner steps mount |
 | `~/.halvard-factory/<repo>/worktrees/<repo>-<job>` | The job's worktree, or its clone in container mode, on its task branch |
@@ -239,4 +316,4 @@ Before you use Grok as the author, run the headless probes from the factory rese
 
 ## Parked jobs
 
-`factory plan`, `build` and `run` exit with status 3 when the job parks, so a script can tell it from a shipped one. A job parks when the agent reports `STATUS: BLOCKED`, a run times out or spends the budget, the gate still fails with no fix pass left, the review blocks round 2, the reviewer stops answering, the branch conflicts with the base, the runner finds tampering, you stop the runner with Ctrl-C, or setup or `gh` fails. The runner records the reason in `job.json`, comments on the issue and adds the `factory:parked` label. The worktree stays for you to inspect. `factory build <job> --retry`, `factory rework <job> --note <file>` or the `factory:retry` label removes that worktree and the job's own branch and builds again from the same brief and approved plan. It also restarts a job left mid-build by a runner that died. A job that parked before its plan was approved, or whose plan run died, gets `factory replan <job>`. After a job parks for tampering, or while a job file does not read, no factory command starts work until you have checked your Git configuration, personal settings and the job file: then run `factory build <job> --retry --checked`, or delete the job's folder. `factory status` never fails on a parked job.
+`factory plan`, `build` and `run` exit with status 3 when the job parks, so a script can tell it from a shipped one. A job parks when the agent reports `STATUS: BLOCKED`, a run times out or spends the budget, the gate still fails with no fix pass left, the review blocks round 2, the reviewer stops answering, the branch conflicts with the base, the runner finds tampering, a blocking holdout check fails, a retro job changes files outside its paths, you stop the runner with Ctrl-C, or setup or `gh` fails. The runner records the reason in `job.json`, comments on the issue and adds the `factory:parked` label. The worktree stays for you to inspect. `factory build <job> --retry`, `factory rework <job> --note <file>` or the `factory:retry` label removes that worktree and the job's own branch and builds again from the same brief and approved plan. It also restarts a job left mid-build by a runner that died. A job that parked before its plan was approved, or whose plan run died, gets `factory replan <job>`. After a job parks for tampering, or while a job file does not read, no factory command starts work until you have checked your Git configuration, personal settings and the job file: then run `factory build <job> --retry --checked`, or delete the job's folder. `factory status` never fails on a parked job.

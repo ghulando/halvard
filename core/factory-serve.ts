@@ -12,6 +12,8 @@ import {
   repoHome,
 } from './factory-store.ts';
 import { monthSpend, writeBoard } from './factory-board.ts';
+import { autoMerge, refreshOutcomes } from './factory-outcomes.ts';
+import { retroDue, retroSource } from './factory-retro.ts';
 import {
   type Context,
   ACTIVE,
@@ -170,6 +172,42 @@ async function decide(ctx: Context, jobs: ReturnType<typeof pool>) {
       });
       if (!go) return;
       if (ready) await jobs.start(() => step(ctx, id, () => build(ctx, id, true)));
+    }
+  }
+
+  // Outcomes of opened pull requests feed the metrics and auto-merge; a GitHub failure here
+  // never stops the daemon from working issues.
+  const { baseBranch } = ctx.project.config.workflow;
+  try {
+    for (const id of autoMerge(ctx.root, baseBranch, ctx.factory.autoMerge)) {
+      say(`${id}: merged by auto-merge`);
+    }
+    refreshOutcomes(ctx.root, baseBranch, ctx.factory.autoMerge.windowDays, {
+      required: ctx.factory.autoMerge.requiredChecks,
+    });
+  } catch (err) {
+    say(`outcomes: ${(err as Error).message}`);
+  }
+  if (stopRequested()) return;
+
+  // A retro is due once a period has passed and findings recur in at least two jobs.
+  const now = new Date();
+  if (retroDue(ctx, now)) {
+    const { source: retro } = retroSource(ctx, now);
+    if (retro) {
+      await jobs.free();
+      if (!underBudget(ctx)) return;
+      if (stopRequested()) return;
+      let job: FactoryJob | null = null;
+      try {
+        job = newJob(ctx, retro, true, false);
+      } catch (err) {
+        say(`retro: ${(err as Error).message}`);
+      }
+      if (job) {
+        const id = job.id;
+        await jobs.start(() => step(ctx, id, () => build(ctx, id, true)));
+      }
     }
   }
 

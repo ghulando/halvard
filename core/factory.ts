@@ -1,4 +1,11 @@
-import type { FactoryConfig, FactoryJob, Harness, Project, ReviewRecord } from './types.ts';
+import type {
+  FactoryConfig,
+  FactoryJob,
+  Harness,
+  HoldoutCheck,
+  Project,
+  ReviewRecord,
+} from './types.ts';
 import { createHash, randomUUID as uuid } from 'node:crypto';
 import {
   existsSync,
@@ -11,7 +18,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { options } from './cli.ts';
 import { eligibleReviewers, personalRoot, reviewerSettings, workspaceRoot } from './flow-config.ts';
 import { boxCommand, boxName, checkImage, removeBox, type Box } from './factory-container.ts';
@@ -40,7 +47,9 @@ import {
   gitRunner,
   hasOrigin,
   riskLevel,
+  type HoldoutResult,
 } from './factory-ship.ts';
+import { changeClass } from './factory-outcomes.ts';
 import {
   activeRun,
   factoryHome,
@@ -103,11 +112,14 @@ export function context(cwd: string): Context {
   return ctx;
 }
 
-const real = (path: string) => {
+// The real path, resolving the nearest folder that exists when the path itself does not, so a
+// missing socket under a linked /var/run still reads as under /run.
+const real = (path: string): string => {
   try {
     return realpathSync(path);
   } catch {
-    return path;
+    const parent = dirname(path);
+    return parent === path ? path : join(real(parent), basename(path));
   }
 };
 
@@ -123,6 +135,12 @@ function checkMounts(ctx: Context) {
     const clash = real(host) === '/' ? '/' : owned.find((path) => overlaps(real(host), real(path)));
     if (clash)
       throw new Error(`factory container mount ${host} overlaps ${clash}, which the runner owns`);
+  }
+  // A holdout the agent could find in its tree or its container is no holdout.
+  const visible = [...owned, ...(ctx.factory.container?.mounts ?? []).map(({ host }) => host)];
+  for (const { name, dir } of ctx.factory.holdout) {
+    const clash = real(dir) === '/' ? '/' : visible.find((path) => overlaps(real(dir), real(path)));
+    if (clash) throw new Error(`factory holdout ${name} folder ${dir} overlaps ${clash}`);
   }
 }
 
@@ -338,6 +356,7 @@ export interface Source {
   title: string;
   brief: string;
   issue: FactoryJob['issue'];
+  scope?: string[];
 }
 
 export function issueSource(ctx: Context, number: number, id?: string): Source {
@@ -405,6 +424,7 @@ export function newJob(ctx: Context, src: Source, small: boolean, fix: boolean) 
     round: 0,
     fixPasses: 0,
     parked: null,
+    scope: src.scope ?? null,
     pr: null,
     costUsd: 0,
   });
@@ -694,6 +714,108 @@ function runnerChild(
   });
 }
 
+// Whether a sampled check runs for this job; a retry of the job gets the same answer.
+export const sampled = (id: string, check: HoldoutCheck) =>
+  check.sample >= 1 || parseInt(digest([id, check.name]).slice(0, 8), 16) / 2 ** 32 < check.sample;
+
+// Holdout checks run after the gate passes, with the scenarios folder mounted read-only for
+// that step only. Their output stays in the job folder: a fix pass never shows it to the
+// builder, so a failed blocking check parks the job instead.
+async function holdouts(
+  ctx: Context,
+  job: FactoryJob,
+  worktree: string,
+  base: string,
+): Promise<{ results: HoldoutResult[]; park: { reason: string; detail: string } | null }> {
+  const results: HoldoutResult[] = [];
+  const checks = ctx.factory.holdout.filter((check) => sampled(job.id, check));
+  if (!checks.length) return { results, park: null };
+  const log = jobFile(ctx.root, job.id, 'holdout.log');
+  const tree = isolated(ctx, () => fingerprint(worktree));
+  for (const check of checks) {
+    const stop = halted(ctx, job);
+    if (stop) return { results, park: { reason: 'stopped-by-human', detail: stop } };
+    if (!existsSync(check.dir)) {
+      return {
+        results,
+        park: { reason: 'infra', detail: `holdout ${check.name}: ${check.dir} does not exist` },
+      };
+    }
+    const scratch = jobFile(ctx.root, job.id, 'holdout-tmp');
+    rmSync(scratch, { recursive: true, force: true });
+    mkdirSync(scratch, { recursive: true, mode: 0o700 });
+    const extra = { HALVARD_HOLDOUT_DIR: check.dir, HALVARD_FACTORY_BASE: base, TMPDIR: scratch };
+    // The check runs code the builder wrote: a writable checkout or extra mount would let it
+    // copy the scenarios where the next fix pass reads them, and a network would let it send
+    // them away.
+    const config = ctx.factory.container;
+    const sealed = config
+      ? {
+          ...ctx,
+          factory: {
+            ...ctx.factory,
+            container: {
+              ...config,
+              network: 'none',
+              mounts: config.mounts.map((mount) => ({ ...mount, readonly: true })),
+            },
+          },
+        }
+      : ctx;
+    const { argv, cleanup } = boxed(sealed, job, `holdout-${check.name}`, check.command, {
+      workdir: worktree,
+      mounts: [
+        { path: worktree, readonly: true },
+        { path: check.dir, readonly: true },
+        { path: scratch, readonly: false },
+      ],
+      env: Object.keys(extra),
+    });
+    const run = await runChild(argv, {
+      cwd: worktree,
+      env: scrubbedEnv(ghShield(ctx, job), extra),
+      timeoutMs: 30 * 60 * 1000,
+      log,
+      cleanup,
+      shouldStop: () => stopping || existsSync(jobFile(ctx.root, job.id, 'stop')),
+    });
+    rmSync(scratch, { recursive: true, force: true });
+    const passed = run.status === 0;
+    recordEvent(ctx.root, job.id, 'holdout', { name: check.name, passed });
+    if (!passed) {
+      const stopped = halted(ctx, job);
+      if (stopped) return { results, park: { reason: 'stopped-by-human', detail: stopped } };
+      if (ctx.factory.container && (run.status === null || run.status === 125)) {
+        return {
+          results,
+          park: { reason: 'infra', detail: `the holdout ${check.name} container did not run` },
+        };
+      }
+    }
+    // The gate's receipt and the review cover this tree; a check may not change it.
+    if (isolated(ctx, () => fingerprint(worktree)) !== tree) {
+      return {
+        results,
+        park: {
+          reason: 'infra',
+          detail: `holdout ${check.name} changed the checkout; a check writes only to $TMPDIR`,
+        },
+      };
+    }
+    results.push({ name: check.name, passed, blocking: check.blocking });
+    if (!passed && check.blocking) {
+      return {
+        results,
+        park: {
+          reason: 'holdout-failed',
+          detail: `holdout check ${check.name} failed; its output is in ${log}. The builder never sees it.`,
+        },
+      };
+    }
+  }
+  return { results, park: null };
+}
+
 const reviewers = new Map<string, boolean>();
 
 // A reviewer counts when its CLI answers where the review runs: here, or in the image.
@@ -890,6 +1012,17 @@ function gitConfig(worktree: string) {
 
 // Changes the runner must never gate, review or ship: workflow configuration, harness
 // settings, the gate's and review's scripts and extensions, as the base commit names them.
+// A scoped job, such as a retro, may change only its scope and its own task file.
+function outOfScope(ctx: Context, job: FactoryJob, worktree: string, base: string, task: string) {
+  if (!job.scope) return null;
+  const outside = isolated(ctx, () => changedFiles(worktree, base)).filter(
+    (file) => file !== task && !matches(file, job.scope!),
+  );
+  return outside.length
+    ? `the job may change only ${job.scope.join(', ')}; it changed ${outside.join(', ')}`
+    : null;
+}
+
 function guardedChanges(worktree: string, base: string, patterns: string[]) {
   return changedFiles(worktree, base).filter((file) => matches(file, patterns));
 }
@@ -998,7 +1131,8 @@ async function work(context: Context, job: FactoryJob, push: boolean, rework: st
     const afterSetup = tampering();
     if (afterSetup) return park(ctx, job, 'tampered', afterSetup);
 
-    if (ctx.factory.tests) {
+    // A scoped job, such as a retro, changes guidance, which acceptance tests do not cover.
+    if (ctx.factory.tests && !job.scope) {
       const stop = halted(ctx, job);
       if (stop) return park(ctx, job, 'stopped-by-human', stop);
       const dir = `${ctx.factory.tests.dir}/${job.id}`;
@@ -1062,6 +1196,7 @@ async function work(context: Context, job: FactoryJob, push: boolean, rework: st
       ? `A human sent this job back with a note. Address it:\n\n${rework}\n`
       : '';
     let note = '';
+    let holdout: HoldoutResult[] = [];
     for (;;) {
       const stop = halted(ctx, job);
       if (stop) return park(ctx, job, 'stopped-by-human', stop);
@@ -1086,12 +1221,26 @@ async function work(context: Context, job: FactoryJob, push: boolean, rework: st
       if (changed) return park(ctx, job, 'tampered', changed);
       const status = agentStatus(result.text);
       if (status.status === 'BLOCKED') return park(ctx, job, 'agent-blocked', status.reason);
+      const scope = outOfScope(ctx, job, worktree, started.base, started.task);
+      if (scope) return park(ctx, job, 'out-of-scope', scope);
 
       job.stage = 'gating';
       saveJob(ctx.root, job);
       const key = sessionKey(worktree, 'factory', `${job.id}-${uuid()}`);
       const gate = await runnerChild(ctx, job, worktree, ['gate', key], 21 * 60 * 1000);
-      recordEvent(ctx.root, job.id, 'gate', { passed: gate.status === 0 });
+      recordEvent(ctx.root, job.id, 'gate', {
+        passed: gate.status === 0,
+        ...(gate.status === 0
+          ? {}
+          : {
+              tail: (gate.stdout + gate.stderr)
+                .trim()
+                .split('\n')
+                .slice(-15)
+                .join('\n')
+                .slice(-1500),
+            }),
+      });
       // A stop ends the gate's process; that is the stop, not a failure of the gate.
       const stopped = gate.status === 0 ? null : halted(ctx, job);
       if (stopped) return park(ctx, job, 'stopped-by-human', stopped);
@@ -1111,6 +1260,10 @@ async function work(context: Context, job: FactoryJob, push: boolean, rework: st
         note = `This is fix pass ${job.fixPasses}. The runner's gate failed on your tree:\n\n${tail}`;
         continue;
       }
+
+      const hidden = await holdouts(ctx, job, worktree, started.base);
+      if (hidden.park) return park(ctx, job, hidden.park.reason, hidden.park.detail);
+      holdout = hidden.results;
 
       const beforeReview = halted(ctx, job);
       if (beforeReview) return park(ctx, job, 'stopped-by-human', beforeReview);
@@ -1163,6 +1316,12 @@ async function work(context: Context, job: FactoryJob, push: boolean, rework: st
         round: job.round,
         verdict: record.verdict,
         findings: record.findings.length,
+        // What the retro reads: each finding, short.
+        items: record.findings.map((finding) => ({
+          severity: finding.severity,
+          location: finding.location.slice(0, 200),
+          problem: finding.problem.slice(0, 400),
+        })),
       });
       if (record.verdict !== 'pass') {
         const summary = join(started.workspace, `${reviewer}-review-round${job.round}.md`);
@@ -1192,6 +1351,7 @@ async function work(context: Context, job: FactoryJob, push: boolean, rework: st
         record,
         push: push ? pushUrl : null,
         plan: expectedPlan,
+        holdout,
       });
     }
   } catch (err) {
@@ -1211,6 +1371,7 @@ async function ship(
     record,
     push,
     plan: expectedPlan,
+    holdout,
   }: {
     worktree: string;
     task: string;
@@ -1220,6 +1381,7 @@ async function ship(
     // The push URL read before any agent ran, or null to stop after the commit.
     push: string | null;
     plan: string | null;
+    holdout: HoldoutResult[];
   },
 ) {
   job.stage = 'shipping';
@@ -1243,6 +1405,9 @@ async function ship(
   if (!gate) throw new Error('the gate receipt disappeared before shipping');
   const files = isolated(ctx, () => changedFiles(worktree, base));
   const risk = riskLevel(files, ctx.factory.riskPaths);
+  // The gate and the holdout checks ran after the last check of the scope.
+  const scope = outOfScope(ctx, job, worktree, base, task);
+  if (scope) return park(ctx, job, 'out-of-scope', scope);
   // Only the reviewed tree plus the status line goes into the commit.
   const unsafe = ctx.factory.container
     ? (unsafeGitDir(worktree) ?? nestedRepo(ctx, worktree))
@@ -1278,6 +1443,21 @@ async function ship(
       `the branch conflicts with ${latest}:\n${merge.stdout.trim().slice(-2000)}`,
     );
   }
+  // The task file is the workflow's own record; the class and size are of the change itself.
+  const changed = files.filter((file) => file !== task);
+  const lines = gitRunner(worktree, ['diff', '--numstat', '--no-renames', '-z', base, 'HEAD', '--'])
+    .split('\0')
+    .reduce((sum, entry) => {
+      const [added, deleted, path] = entry.split('\t');
+      // A binary file counts as large, so a class never merges one by itself.
+      if (path === task || !path) return sum;
+      return sum + (added === '-' ? Infinity : Number(added) + Number(deleted));
+    }, 0);
+  const change = {
+    class: changeClass(changed, ctx.factory.autoMerge.classes),
+    lines,
+    firstTry: job.fixPasses === 0 && record.round === 1,
+  };
   const body = evidenceMarkdown({
     job,
     base,
@@ -1286,14 +1466,24 @@ async function ship(
     files,
     diffStat: gitRunner(worktree, ['diff', '--stat', base, 'HEAD']),
     risk,
+    holdout,
+    change,
   });
   writeFileSync(jobFile(ctx.root, job.id, 'evidence.md'), body, { mode: 0o600 });
   writeFileSync(
     jobFile(ctx.root, job.id, 'evidence.json'),
-    JSON.stringify({ done, gate, review: record, files, risk }, null, 2) + '\n',
+    JSON.stringify({ done, gate, review: record, files, risk, holdout, change }, null, 2) + '\n',
     { mode: 0o600 },
   );
-  recordEvent(ctx.root, job.id, 'committed', { tree: done.tree, risk: risk.level });
+  recordEvent(ctx.root, job.id, 'committed', {
+    tree: done.tree,
+    risk: risk.level,
+    head: gitRunner(worktree, ['rev-parse', 'HEAD']).trim(),
+    files: changed,
+    holdoutFailed: holdout.some((check) => !check.passed),
+    ...change,
+    lines: Number.isFinite(lines) ? lines : null,
+  });
   if (!push) {
     job.stage = 'committed';
     saveJob(ctx.root, job);
@@ -1419,6 +1609,9 @@ const usage = `halvard factory commands, run from the repository's main checkout
   factory serve [--once]        Poll labeled issues and work them until stopped
   factory board [--out <file>]  Write the HTML board and print its path
   factory metrics               Print the factory's numbers
+  factory automerge             Dry run: which pull requests would have merged by themselves
+  factory retro [--since <days>] [--no-push]
+                                Turn recurring findings into a job that edits guidance
   factory status [<job>]        Print job state
 `;
 
@@ -1434,6 +1627,8 @@ const SPECS: Record<string, { count: [number, number]; options: string[] }> = {
   serve: { count: [0, 0], options: ['once'] },
   board: { count: [0, 0], options: ['out'] },
   metrics: { count: [0, 0], options: [] },
+  automerge: { count: [0, 0], options: [] },
+  retro: { count: [0, 0], options: ['since', 'no-push'] },
 };
 
 // Commands that only report, or only stop work, run while a job is running.
@@ -1469,7 +1664,9 @@ export async function factoryCommand(cwd: string, args: string[]) {
     }
   };
   // An agent inside a run inherits the user's shell; it must not approve or start work.
-  const running = UNCHECKED.includes(verb) ? null : activeRun(ctx.root);
+  // The auto-merge dry run only reads, but it fetches the base with your credentials, so it
+  // waits for a tampered job to be checked like the commands that start work.
+  const running = UNCHECKED.includes(verb) || verb === 'automerge' ? null : activeRun(ctx.root);
   if (running) {
     throw new Error(`factory job ${running} is running; wait until its runner exits`);
   }
@@ -1496,6 +1693,26 @@ export async function factoryCommand(cwd: string, args: string[]) {
   }
   if (verb === 'stop') {
     print(stopJob(ctx, positional[0]!));
+    return;
+  }
+  if (verb === 'automerge') {
+    const { autoMergeReport } = await import('./factory-outcomes.ts');
+    print(autoMergeReport(ctx.root, ctx.project.config.workflow.baseBranch, ctx.factory.autoMerge));
+    return;
+  }
+  if (verb === 'retro') {
+    const { retroSource } = await import('./factory-retro.ts');
+    let days: number | undefined;
+    if (flags.since !== undefined) {
+      if (typeof flags.since !== 'string' || !/^[1-9][0-9]{0,2}$/.test(flags.since)) {
+        throw new Error('--since takes a number of days, 1..999');
+      }
+      days = Number(flags.since);
+    }
+    const { source: retro, reason } = retroSource(ctx, new Date(), days);
+    if (!retro) throw new Error(`no retro: ${reason}`);
+    const job = newJob(ctx, retro, true, false);
+    print(await build(ctx, job.id, !flags['no-push']));
     return;
   }
   // Long-running commands park their job on Ctrl-C instead of dying mid-step.

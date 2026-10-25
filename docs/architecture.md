@@ -344,7 +344,7 @@ flowchart TB
     g1 -- "Reads and writes<br/>[files]" --> d1
     c1 -- "Reads and writes<br/>[files]" --> d1
     f1 -- "Reads and writes<br/>[files]" --> d1
-    f1 -- "Starts plan, build and review runs<br/>[process]" --> hh
+    f1 -- "Starts plan and build runs, and reviews through the CLI<br/>[process]" --> hh
     hh -- "Calls per hook<br/>[JSON on stdin]" --> g1
     f1 -- "Fetches, pushes, opens pull requests<br/>[git over HTTPS or SSH, gh]" --> gh
     f2 -- "Fetches, pushes, opens pull requests<br/>[git over HTTPS or SSH, gh]" --> gh
@@ -368,7 +368,7 @@ flowchart TB
     style net fill:none,stroke:#6b6b6b,stroke-dasharray:3 3
 ```
 
-_Key: dashed frames are deployment nodes; boxes inside them are the containers deployed there._ On the server only the runner holds GitHub and SSH credentials. Every container gets the clone with a read-only `.git`, the extra mounts you configure, the variables you list (the model keys by default) and Halvard's own settings variables, such as `HALVARD_UNATTENDED`; no other host variable reaches it. Setup containers get nothing more. Agent containers also get the task workspace and their prompt folder. Gate, review and `task-done` containers also get the job's receipt folder, the task workspace and, read-only, your personal settings. [Factory](factory.md#containers) lists every mount.
+_Key: dashed frames are deployment nodes; boxes inside them are the containers deployed there._ On the server only the runner holds GitHub and SSH credentials. Every container gets the clone with a read-only `.git`, the extra mounts you configure and the variables you list (the model keys by default); no other host variable reaches it. Setup containers get nothing more. The others also get Halvard's own settings variables, such as `HALVARD_UNATTENDED`. Agent containers also get their prompt folder and, for a build, the task workspace. Holdout containers get the checkout, the extra mounts and the scenarios folder read-only, and a writable scratch folder. Gate, review and `task-done` containers also get the job's receipt folder, the task workspace and, read-only, your personal settings. [Factory](factory.md#containers) lists every mount.
 
 ## Where things live
 

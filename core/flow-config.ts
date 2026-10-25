@@ -369,6 +369,9 @@ export function factoryConfig(input: unknown): FactoryConfig {
     'maxFixPasses',
     'draft',
     'riskPaths',
+    'monthlyUsd',
+    'pollSeconds',
+    'tests',
   ];
   for (const key of Object.keys(value)) {
     if (!keys.includes(key)) throw new Error(`unknown factory option: ${key}`);
@@ -441,6 +444,42 @@ export function factoryConfig(input: unknown): FactoryConfig {
   ) {
     throw new Error('factory riskPaths must contain repo-relative patterns');
   }
+  const monthlyUsd = value.monthlyUsd ?? 200;
+  if (typeof monthlyUsd !== 'number' || !(monthlyUsd > 0) || monthlyUsd > 100000) {
+    throw new Error('factory monthlyUsd must be a positive number');
+  }
+  const pollSeconds = value.pollSeconds ?? 300;
+  if (
+    !Number.isInteger(pollSeconds) ||
+    (pollSeconds as number) < 60 ||
+    (pollSeconds as number) > 3600
+  ) {
+    throw new Error('factory pollSeconds must be 60..3600');
+  }
+  let tests: FactoryConfig['tests'] = null;
+  if (value.tests !== undefined && value.tests !== null) {
+    const raw = value.tests as Record<string, unknown>;
+    if (
+      !raw ||
+      typeof raw !== 'object' ||
+      Array.isArray(raw) ||
+      Object.keys(raw).some((key) => !['by', 'dir'].includes(key)) ||
+      !isHarness(raw.by) ||
+      typeof raw.dir !== 'string' ||
+      raw.dir.startsWith('/') ||
+      !raw.dir.replace(/\/+$/, '') ||
+      raw.dir
+        .replace(/\/+$/, '')
+        .split('/')
+        .some((part) => !part || part === '..' || part === '.git')
+    ) {
+      throw new Error('factory tests needs by (a harness) and dir (a relative folder)');
+    }
+    // The point of the second harness is that the builder did not write its own tests.
+    if (raw.by === author)
+      throw new Error('factory tests must be written by another harness than the author');
+    tests = { by: raw.by, dir: raw.dir.replace(/\/+$/, '') };
+  }
   return {
     author,
     reviewers: reviewers as string[],
@@ -455,5 +494,8 @@ export function factoryConfig(input: unknown): FactoryConfig {
     maxFixPasses: maxFixPasses as number,
     draft,
     riskPaths: [...new Set([...RISK_PATHS, ...(riskPaths as string[])])],
+    monthlyUsd,
+    pollSeconds: pollSeconds as number,
+    tests,
   };
 }

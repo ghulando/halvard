@@ -52,8 +52,10 @@ export function repoHome(root: string) {
 }
 
 export const jobDirectory = (root: string, id: string) => join(repoHome(root), 'jobs', jobId(id));
+// The task workspace is named after the worktree folder, so the folder carries the
+// repository's name: two repositories with a job issue-1 each must not share one.
 export const worktreePath = (root: string, id: string, suffix = '') =>
-  join(repoHome(root), 'worktrees', jobId(id) + suffix);
+  join(repoHome(root), 'worktrees', `${basename(root)}-${jobId(id)}${suffix}`);
 
 // The runner is the only writer of job.json, and it rewrites the whole file each time.
 export function saveJob(root: string, job: FactoryJob) {
@@ -85,6 +87,7 @@ const STAGES = [
   'planning',
   'awaiting-approval',
   'approved',
+  'testing',
   'building',
   'gating',
   'reviewing',
@@ -134,19 +137,37 @@ export function loadJob(root: string, id: string): FactoryJob {
     Number.isSafeInteger(job.round) &&
     Number.isSafeInteger(job.fixPasses) &&
     optional(job.parked, (parked) => text((parked as Record<string, unknown>).reason)) &&
+    optional(job.tests ?? null, (tests) => {
+      const value = tests as Record<string, unknown>;
+      return text(value.dir) && /^[a-f0-9]{64}$/.test(String(value.digest));
+    }) &&
     optional(job.pr, text) &&
     typeof job.costUsd === 'number';
   if (!valid) throw new Error(`invalid factory job file ${file}`);
   return job;
 }
 
-export function listJobs(root: string) {
+const jobNames = (root: string) => {
   const dir = join(repoHome(root), 'jobs');
   return readdirSync(dir)
     .filter((name) => JOB_ID.test(name) && existsSync(join(dir, name, 'job.json')))
-    .sort()
-    .map((name) => loadJob(root, name));
-}
+    .sort();
+};
+
+const readable = (root: string, name: string) => {
+  try {
+    return loadJob(root, name);
+  } catch {
+    return null;
+  }
+};
+
+// Every job whose file reads and validates; jobProblems names the others.
+export const listJobs = (root: string) =>
+  jobNames(root).flatMap((name) => readable(root, name) ?? []);
+
+export const jobProblems = (root: string) =>
+  jobNames(root).filter((name) => readable(root, name) === null);
 
 // Append-only record of what the runner did, for the board, metrics and retros.
 export function recordEvent(root: string, id: string, event: string, data: object = {}) {
@@ -183,8 +204,21 @@ export function activeRun(root: string) {
 }
 
 // One runner works a job at a time. A lock whose process is gone is reclaimed.
-export function lockJob(root: string, id: string) {
-  const lock = jobFile(root, id, 'runner.lock');
+export const lockJob = (root: string, id: string) =>
+  lockFile(jobFile(root, id, 'runner.lock'), `factory job ${id}`);
+
+// One daemon serves a repository at a time.
+export const lockServe = (root: string) =>
+  lockFile(join(repoHome(root), 'serve.lock'), 'factory serve for this repository');
+
+// The process that holds a lock file, while it is alive.
+export function lockHolder(path: string) {
+  if (!existsSync(path)) return null;
+  const pid = Number(readFileSync(path, 'utf8'));
+  return Number.isSafeInteger(pid) && pid > 0 && alive(pid) ? pid : null;
+}
+
+function lockFile(lock: string, what: string) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 });
@@ -192,9 +226,9 @@ export function lockJob(root: string, id: string) {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       const pid = Number(readFileSync(lock, 'utf8'));
-      if (alive(pid)) throw new Error(`factory job ${id} is already running in process ${pid}`);
+      if (alive(pid)) throw new Error(`${what} is already running in process ${pid}`);
       rmSync(lock, { force: true });
     }
   }
-  throw new Error(`cannot lock factory job ${id}`);
+  throw new Error(`cannot lock ${what}`);
 }

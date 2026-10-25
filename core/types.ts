@@ -152,6 +152,12 @@ export interface FactoryConfig {
   maxFixPasses: number;
   draft: boolean;
   riskPaths: string[];
+  // Agent spend per calendar month (UTC); the daemon claims no new work past 90% of it.
+  monthlyUsd: number;
+  // How often factory serve polls GitHub, in seconds.
+  pollSeconds: number;
+  // A second harness writes acceptance tests the builder may not change.
+  tests: { by: Harness; dir: string } | null;
 }
 
 export type FactoryStage =
@@ -159,6 +165,7 @@ export type FactoryStage =
   | 'planning'
   | 'awaiting-approval'
   | 'approved'
+  | 'testing'
   | 'building'
   | 'gating'
   | 'reviewing'
@@ -190,7 +197,9 @@ export interface FactoryJob {
   reviewer: string | null;
   round: number;
   fixPasses: number;
-  parked: { reason: string; detail: string } | null;
+  parked: { reason: string; detail: string; at?: string } | null;
+  // The frozen acceptance tests: their folder and a digest of every file in it.
+  tests?: { dir: string; digest: string } | null;
   pr: string | null;
   costUsd: number;
   created: string;

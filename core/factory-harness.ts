@@ -217,6 +217,7 @@ export function runAgent(
     env,
     log,
     timeoutSeconds,
+    shouldStop = () => false,
   }: {
     cwd: string;
     prompt: string;
@@ -226,6 +227,8 @@ export function runAgent(
     env: NodeJS.ProcessEnv;
     log: string;
     timeoutSeconds: number;
+    // Polled every few seconds; true stops the agent as an interruption.
+    shouldStop?: () => boolean;
   },
 ): Promise<AgentResult> {
   const scratch = mkdtempSync(join(tmpdir(), 'halvard-factory-'));
@@ -253,6 +256,7 @@ export function runAgent(
       settled = true;
       clearTimeout(timer);
       clearTimeout(kill);
+      clearInterval(poll);
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);
       // Nothing the agent started may keep running after its turn, let alone change the
@@ -282,6 +286,9 @@ export function runAgent(
     };
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
+    const poll = setInterval(() => {
+      if (shouldStop()) stop();
+    }, 5000);
     // SIGINT lets the host end its turn; the group is killed if it does not stop.
     const timer = setTimeout(() => {
       timedOut = true;

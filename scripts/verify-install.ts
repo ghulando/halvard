@@ -108,6 +108,7 @@ try {
     'CHANGELOG.md',
     'docs/flow.md',
     'docs/configuration.md',
+    'docs/factory.md',
     'docs/troubleshooting.md',
     'UPSTREAM.md',
   ]) {

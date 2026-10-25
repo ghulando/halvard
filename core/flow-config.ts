@@ -1,4 +1,4 @@
-import type { FlowConfig, Harness, ReadCommand, TeamConfig } from './types.ts';
+import type { FactoryConfig, FlowConfig, Harness, ReadCommand, TeamConfig } from './types.ts';
 import { HARNESSES } from './types.ts';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -318,5 +318,142 @@ export function teamConfig(input: unknown): TeamConfig {
     reviewer: value.reviewer as Harness,
     investigator: investigator as Harness | null,
     monitor: monitor as TeamConfig['monitor'],
+  };
+}
+
+// Paths whose change always makes a factory PR high risk. Repositories add their own.
+const RISK_PATHS = [
+  '.github/**',
+  '.gitlab-ci.yml',
+  '.halvard.json',
+  '.claude/**',
+  '.codex/**',
+  '.grok/**',
+  '.cursor/**',
+  '.agents/**',
+  '.pi/**',
+];
+
+const argv = (value: unknown, name: string) => {
+  if (
+    !Array.isArray(value) ||
+    !value.length ||
+    value.some((part) => typeof part !== 'string' || !part || /[\0\r\n]/.test(part))
+  ) {
+    throw new Error(`factory ${name} must be a nonempty array of strings`);
+  }
+  return value as string[];
+};
+
+const seconds = (value: unknown, name: string) => {
+  if (!Number.isInteger(value) || (value as number) < 60 || (value as number) > 4 * 3600) {
+    throw new Error(`factory timeouts.${name} must be 60..14400 seconds`);
+  }
+  return value as number;
+};
+
+// The factory block of .halvard.json. Edits to it ask like every workflow setting.
+export function factoryConfig(input: unknown): FactoryConfig {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('factory must be an object');
+  }
+  const value = input as Record<string, unknown>;
+  const keys = [
+    'author',
+    'reviewers',
+    'setup',
+    'auth',
+    'harnessArgs',
+    'timeouts',
+    'budgetUsd',
+    'maxFixPasses',
+    'draft',
+    'riskPaths',
+  ];
+  for (const key of Object.keys(value)) {
+    if (!keys.includes(key)) throw new Error(`unknown factory option: ${key}`);
+  }
+  const author = value.author ?? 'claude';
+  if (!isHarness(author)) throw new Error(`factory author must be ${HARNESSES.join(', ')}`);
+  const reviewers = value.reviewers ?? [];
+  if (
+    !Array.isArray(reviewers) ||
+    reviewers.some((name) => typeof name !== 'string' || !providers.includes(name)) ||
+    new Set(reviewers).size !== reviewers.length
+  ) {
+    throw new Error(`factory reviewers must list distinct providers: ${providers.join(', ')}`);
+  }
+  const rawSetup = value.setup ?? [];
+  if (!Array.isArray(rawSetup)) throw new Error('factory setup must be a command or a list');
+  const setup = (
+    rawSetup.length && !Array.isArray(rawSetup[0]) ? [rawSetup] : (rawSetup as unknown[])
+  ).map((step) => argv(step, 'setup step'));
+  const harnessMap = <T>(raw: unknown, name: string, check: (entry: unknown) => T) => {
+    if (raw === undefined) return {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error(`factory ${name} must be an object keyed by harness`);
+    }
+    return Object.fromEntries(
+      Object.entries(raw).map(([harness, entry]) => {
+        if (!isHarness(harness))
+          throw new Error(`factory ${name} names unknown harness ${harness}`);
+        return [harness, check(entry)];
+      }),
+    ) as Partial<Record<Harness, T>>;
+  };
+  const auth = harnessMap(value.auth, 'auth', (entry) => {
+    if (entry !== 'api' && entry !== 'subscription') {
+      throw new Error('factory auth values must be api or subscription');
+    }
+    return entry;
+  });
+  const harnessArgs = harnessMap(value.harnessArgs, 'harnessArgs', (entry) =>
+    Array.isArray(entry) && !entry.length ? [] : argv(entry, 'harnessArgs entry'),
+  );
+  const timeouts = (value.timeouts === undefined ? {} : value.timeouts) as Record<string, unknown>;
+  if (!timeouts || typeof timeouts !== 'object' || Array.isArray(timeouts)) {
+    throw new Error('factory timeouts must be an object');
+  }
+  for (const key of Object.keys(timeouts)) {
+    if (!['plan', 'build'].includes(key)) throw new Error(`unknown factory timeout: ${key}`);
+  }
+  const budgetUsd = value.budgetUsd ?? 5;
+  if (typeof budgetUsd !== 'number' || !(budgetUsd > 0) || budgetUsd > 1000) {
+    throw new Error('factory budgetUsd must be a positive number up to 1000');
+  }
+  const maxFixPasses = value.maxFixPasses ?? 2;
+  if (
+    !Number.isInteger(maxFixPasses) ||
+    (maxFixPasses as number) < 0 ||
+    (maxFixPasses as number) > 3
+  ) {
+    throw new Error('factory maxFixPasses must be 0..3');
+  }
+  const draft = value.draft ?? true;
+  if (typeof draft !== 'boolean') throw new Error('factory draft must be true or false');
+  const riskPaths = value.riskPaths ?? [];
+  if (
+    !Array.isArray(riskPaths) ||
+    riskPaths.some(
+      (path) =>
+        typeof path !== 'string' || !path || path.startsWith('/') || path.split('/').includes('..'),
+    )
+  ) {
+    throw new Error('factory riskPaths must contain repo-relative patterns');
+  }
+  return {
+    author,
+    reviewers: reviewers as string[],
+    setup,
+    auth,
+    harnessArgs,
+    timeouts: {
+      plan: seconds(timeouts.plan ?? 900, 'plan'),
+      build: seconds(timeouts.build ?? 2700, 'build'),
+    },
+    budgetUsd,
+    maxFixPasses: maxFixPasses as number,
+    draft,
+    riskPaths: [...new Set([...RISK_PATHS, ...(riskPaths as string[])])],
   };
 }

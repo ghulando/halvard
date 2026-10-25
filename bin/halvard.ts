@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { parseCommand } from '../core/cli.ts';
+import { readFileSync } from 'node:fs';
 import { approveFromTerminal, runGate } from '../core/runtime.ts';
 
 const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
@@ -14,6 +15,9 @@ const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
   bootstrap <repo>                 Print stack records and repo state as JSON
   bootstrap-apply <repo> <plan>     Apply a confirmed, current bootstrap plan
   task-start <id> <title> --author <harness> [--fix] [--small]
+             [--brief <file>] [--base <ref>] [--plan <file> --approved-by <name>]
+  task-done <task-file> --gate-session <session-key>
+                                    Mark done when the session's gate and the review cover this tree
   task-resume <task-file>           Read portable task and current worktree
   task-handoff <task-file> --author <harness>
   review <task-file> --author <harness> --reviewer claude|codex|grok|cursor|ollama --round <number> --gate-session <session-key>
@@ -25,6 +29,8 @@ const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
   review-status <task-file>         Show recorded independent reviews
   gate <session-key>               Run configured checks for this session
   approve <session-key> <request>  Approve one guarded operation; run it in your own terminal
+  factory <plan|approve|build|run|status> ...
+                                    Run the software factory; see docs/factory.md
   history-plan --harness claude,pi,codex|all  Preview history and save a private plan
   history-digest --harness claude,pi,codex|all  Print compact session digests
   history-clean <plan-file> --confirm DELETE  Delete reviewed entries, skipping changed ones
@@ -41,6 +47,10 @@ try {
   const [command, ...args] = process.argv.slice(2);
   if (!command || command === '--help' || command === 'help') {
     process.stdout.write(help);
+  } else if (command === 'factory') {
+    // The factory has its own subcommand grammar.
+    const { factoryCommand } = await import('../core/factory.ts');
+    await factoryCommand(process.cwd(), args);
   } else {
     const { positional, flags } = parseCommand(command, args);
     switch (command) {
@@ -129,14 +139,26 @@ try {
       }
       case 'task-start': {
         const { startTask } = await import('../core/tasks.ts');
+        const text = (name: string) =>
+          typeof flags[name] === 'string' ? readFileSync(flags[name], 'utf8') : undefined;
         print(
           startTask(process.cwd(), {
             id: positional[0]!,
             title: positional[1]!,
-            ...flags,
             author: flags.author as string,
+            fix: flags.fix === true,
+            small: flags.small === true,
+            brief: text('brief'),
+            base: flags.base as string | undefined,
+            plan: text('plan'),
+            approvedBy: flags['approved-by'] as string | undefined,
           }),
         );
+        break;
+      }
+      case 'task-done': {
+        const { completeTask } = await import('../core/runtime.ts');
+        print(await completeTask(process.cwd(), positional[0]!, flags['gate-session'] as string));
         break;
       }
       case 'task-resume': {

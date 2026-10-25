@@ -132,7 +132,69 @@ export interface ProjectConfig {
   extensions: string[];
   stack: StackStamp | null;
   team: TeamConfig | null;
+  factory: FactoryConfig | null;
   workflow: FlowConfig;
+}
+
+// Factory mode: a runner drives headless harnesses through one task and ships the result.
+export interface FactoryConfig {
+  author: Harness;
+  // Reviewer preference for the first round; later rounds keep the first round's reviewer.
+  reviewers: string[];
+  setup: string[][];
+  auth: Partial<Record<Harness, 'api' | 'subscription'>>;
+  harnessArgs: Partial<Record<Harness, string[]>>;
+  // Wall-clock limits in seconds.
+  timeouts: { plan: number; build: number };
+  // Claude's --max-budget-usd for each agent run.
+  budgetUsd: number;
+  // Agent runs after the first build that fix a failed gate or a blocked review.
+  maxFixPasses: number;
+  draft: boolean;
+  riskPaths: string[];
+}
+
+export type FactoryStage =
+  | 'awaiting-plan'
+  | 'planning'
+  | 'awaiting-approval'
+  | 'approved'
+  | 'building'
+  | 'gating'
+  | 'reviewing'
+  | 'shipping'
+  | 'committed'
+  | 'pr-open'
+  | 'parked';
+
+export interface FactoryJob {
+  version: 1;
+  id: string;
+  repo: string;
+  title: string;
+  issue: { number: number; url: string } | null;
+  small: boolean;
+  fix: boolean;
+  author: Harness;
+  stage: FactoryStage;
+  worktree: string | null;
+  branch: string | null;
+  task: string | null;
+  // proposedAt is when the plan went to the issue; a label added before it approves nothing.
+  plan: {
+    digest: string;
+    approvedBy: string | null;
+    at: string | null;
+    proposedAt?: string | null;
+  } | null;
+  reviewer: string | null;
+  round: number;
+  fixPasses: number;
+  parked: { reason: string; detail: string } | null;
+  pr: string | null;
+  costUsd: number;
+  created: string;
+  updated: string;
 }
 
 export interface TeamConfig {
@@ -221,6 +283,8 @@ export interface TaskMetadata {
   base: string;
   small?: boolean;
   reviewCycle?: string;
+  // An approved plan: the SHA-256 of the task's Approved plan section and who approved it.
+  plan?: { digest: string; approvedBy: string; at: string };
 }
 
 export interface Task {

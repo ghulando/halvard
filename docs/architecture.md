@@ -300,8 +300,9 @@ sequenceDiagram
     S->>S: Tamper checks again
     S->>C: halvard task-done
     S->>S: Scope, Git directory and fingerprint checks, then commit the reviewed tree [git]
+    S->>J: Record the committed event [JSON]
     S->>GH: Push and open a draft pull request with evidence [git, gh]
-    S->>J: Record the committed and pull request events
+    S->>J: Record the pull request event [JSON]
 ```
 
 _Key: solid arrows are calls, dashed arrows are replies; the bracket names the technology._ Setup steps and the optional acceptance-test writer run between steps 9 and 10. A failed gate or a blocked review sends the job back to step 10 while fix passes remain; otherwise the job parks and the runner comments on the issue. Outcomes of the pull request are fetched later, by `factory serve` or `factory automerge`.
@@ -319,6 +320,7 @@ flowchart TB
             c1["<b>halvard CLI</b><br/>[Node.js process]"]
         end
         f1["<b>Factory runner</b><br/>[Node.js process in a terminal]"]
+        hh["<b>Headless harness runs</b><br/>[harness CLI processes]"]
         d1[("<b>Workflow state, task workspace, factory store</b><br/>[files under TMPDIR, ~/.halvard, ~/.halvard-factory]")]
     end
 
@@ -342,21 +344,23 @@ flowchart TB
     g1 -- "Reads and writes<br/>[files]" --> d1
     c1 -- "Reads and writes<br/>[files]" --> d1
     f1 -- "Reads and writes<br/>[files]" --> d1
-    f1 -- "Starts headless runs<br/>[process]" --> h1
-    f1 -- "gh, git over HTTPS" --> gh
-    f2 -- "gh, git over HTTPS" --> gh
-    f2 -- "docker run" --> a2
-    f2 -- "docker run" --> r2
-    f2 -- "docker run" --> o2
+    f1 -- "Starts plan, build and review runs<br/>[process]" --> hh
+    hh -- "Calls per hook<br/>[JSON on stdin]" --> g1
+    f1 -- "Fetches, pushes, opens pull requests<br/>[git over HTTPS or SSH, gh]" --> gh
+    f2 -- "Fetches, pushes, opens pull requests<br/>[git over HTTPS or SSH, gh]" --> gh
+    f2 -- "Starts<br/>[docker run]" --> a2
+    f2 -- "Starts<br/>[docker run]" --> r2
+    f2 -- "Starts<br/>[docker run]" --> o2
     f2 -- "Reads and writes<br/>[files]" --> d2
-    h1 -- "HTTPS" --> api
-    a2 -- "HTTPS through the proxy, if allowed" --> api
+    h1 -- "Sends prompts<br/>[HTTPS]" --> api
+    hh -- "Sends prompts<br/>[HTTPS]" --> api
+    a2 -- "Sends prompts through the proxy, if allowed<br/>[HTTPS]" --> api
     r2 -- "Reviewer and gate traffic, if allowed<br/>[HTTPS]" --> api
 
     classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
     classDef external fill:#999999,stroke:#6b6b6b,color:#ffffff
     class g1,c1,f1,f2,d1,d2,a2,r2,o2 container
-    class h1,gh,api external
+    class h1,hh,gh,api external
     style laptop fill:none,stroke:#0b4884,stroke-dasharray:6 4
     style vps fill:none,stroke:#0b4884,stroke-dasharray:6 4
     style term fill:none,stroke:#2e6295,stroke-dasharray:3 3
@@ -364,7 +368,7 @@ flowchart TB
     style net fill:none,stroke:#6b6b6b,stroke-dasharray:3 3
 ```
 
-_Key: dashed frames are deployment nodes; boxes inside them are the containers deployed there._ On the server only the runner holds GitHub and SSH credentials. Every container gets the clone with a read-only `.git`, the extra mounts you configure and only the variables you list, which are the model keys by default. Agent containers also get the task workspace and their prompt folder; runner-step containers also get the job's receipt folder and, read-only, your personal settings. [Factory](factory.md#containers) lists every mount.
+_Key: dashed frames are deployment nodes; boxes inside them are the containers deployed there._ On the server only the runner holds GitHub and SSH credentials. Every container gets the clone with a read-only `.git`, the extra mounts you configure, the variables you list (the model keys by default) and Halvard's own settings variables, such as `HALVARD_UNATTENDED`; no other host variable reaches it. Setup containers get nothing more. Agent containers also get the task workspace and their prompt folder. Gate, review and `task-done` containers also get the job's receipt folder, the task workspace and, read-only, your personal settings. [Factory](factory.md#containers) lists every mount.
 
 ## Where things live
 

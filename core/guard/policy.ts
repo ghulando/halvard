@@ -1,4 +1,4 @@
-import type { HookResult } from './types.ts';
+import type { HookResult } from '../types.ts';
 
 interface PolicyInput {
   readonly: boolean;

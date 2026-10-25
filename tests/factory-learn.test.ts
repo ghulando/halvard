@@ -10,17 +10,18 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { factoryConfig } from '../core/flow-config.ts';
-import { factoryCommand, sampled } from '../core/factory.ts';
-import { jobEvents, metrics } from '../core/factory-board.ts';
-import { changeClass, ciState } from '../core/factory-outcomes.ts';
-import { changedFiles } from '../core/factory-ship.ts';
-import { createJob, jobFile, loadJob, recordEvent, repoHome } from '../core/factory-store.ts';
+import { factoryCommand, sampled } from '../core/factory/pipeline.ts';
+import { jobEvents, metrics } from '../core/factory/board.ts';
+import { changeClass, ciState } from '../core/factory/outcomes.ts';
+import { changedFiles } from '../core/factory/ship.ts';
+import { createJob, jobFile, loadJob, recordEvent, repoHome } from '../core/factory/store.ts';
 import { pluginRoot } from '../core/runtime.ts';
 import { commit, env, repo, stubs } from './factory-stubs.ts';
 
@@ -225,6 +226,16 @@ test('a holdout check may not change the checkout, nor live where the agent can 
   const inside = repo(t);
   const config = JSON.parse(readFileSync(join(inside, '.halvard.json'), 'utf8'));
   config.factory.holdout = [{ name: 'scenarios', dir: join(inside, 'scenarios'), command: ['x'] }];
+  writeFileSync(join(inside, '.halvard.json'), JSON.stringify(config));
+  await assert.rejects(factoryCommand(inside, ['status']), /holdout scenarios folder .* overlaps/);
+
+  // Named through a link in the checkout, the folder is still where the agent works.
+  const outside = holdoutDir(t, 'implemented');
+  mkdirSync(join(outside, 'deeper'));
+  symlinkSync(outside, join(inside, 'linked'));
+  config.factory.holdout = [
+    { name: 'scenarios', dir: join(inside, 'linked', 'deeper'), command: ['x'] },
+  ];
   writeFileSync(join(inside, '.halvard.json'), JSON.stringify(config));
   await assert.rejects(factoryCommand(inside, ['status']), /holdout scenarios folder .* overlaps/);
 });

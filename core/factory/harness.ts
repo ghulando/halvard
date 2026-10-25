@@ -1,4 +1,4 @@
-import type { FactoryConfig, Harness } from './types.ts';
+import type { FactoryConfig, Harness } from '../types.ts';
 import { spawn } from 'node:child_process';
 import {
   closeSync,
@@ -11,9 +11,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MODEL_KEY_NAMES } from './flow-config.ts';
-import { pluginRoot } from './runtime.ts';
-import { hostResult } from './review.ts';
+import { MODEL_KEY_NAMES } from '../flow-config.ts';
+import { pluginRoot } from '../runtime.ts';
+import { hostResult } from '../workflow/review.ts';
 
 export type Stage = 'plan' | 'build';
 
@@ -23,6 +23,14 @@ const live = new Set<() => void>();
 process.on('exit', () => {
   for (const end of live) end();
 });
+
+// Children run detached in their own process group, so a signal reaches everything they
+// started. The group may already be gone.
+function signalGroup(pid: number | undefined, signal: NodeJS.Signals) {
+  try {
+    process.kill(-pid!, signal);
+  } catch {}
+}
 
 // Model credentials the harnesses need. Every other variable that looks like a credential
 // is removed, so an agent does not use one by accident; this is not a boundary against
@@ -278,11 +286,7 @@ export function runAgent(
       detached: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    const signal = (name: NodeJS.Signals) => {
-      try {
-        process.kill(-child.pid!, name);
-      } catch {}
-    };
+    const signal = (name: NodeJS.Signals) => signalGroup(child.pid, name);
     let kill: NodeJS.Timeout | undefined;
     // The agent runs in its own group, so the operator's Ctrl-C reaches only the runner,
     // which stops the agent and parks the job instead of leaving it working alone.
@@ -327,16 +331,10 @@ export function runAgent(
           error: `unreadable ${harness} output: ${(err as Error).message}`,
         };
       }
-      finish({
-        ...parsed,
-        exitCode: code,
-        timedOut,
-        error: interrupted
-          ? 'interrupted'
-          : timedOut
-            ? 'agent run timed out'
-            : (parsed.error ?? (code === 0 ? null : `${harness} exited ${code}`)),
-      });
+      let error = parsed.error ?? (code === 0 ? null : `${harness} exited ${code}`);
+      if (timedOut) error = 'agent run timed out';
+      if (interrupted) error = 'interrupted';
+      finish({ ...parsed, exitCode: code, timedOut, error });
     });
   });
 }
@@ -384,9 +382,7 @@ export function runChild(
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const end = () => {
-      try {
-        process.kill(-child.pid!, 'SIGKILL');
-      } catch {}
+      signalGroup(child.pid, 'SIGKILL');
       cleanup();
     };
     const timer = setTimeout(end, timeoutMs);

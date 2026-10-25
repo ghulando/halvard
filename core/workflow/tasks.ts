@@ -1,10 +1,10 @@
-import type { Project, Task, TaskMetadata } from './types.ts';
+import type { Project, Task, TaskMetadata } from '../types.ts';
 import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, dirname, resolve } from 'node:path';
-import { AUTHOR_ERROR, authors, eligibleReviewers, workspaceRoot } from './flow-config.ts';
-import { currentBranch, git, loadProject, projectPath, readText } from './project.ts';
-import { privateDirectory } from './state.ts';
+import { AUTHOR_ERROR, authors, eligibleReviewers, workspaceRoot } from '../flow-config.ts';
+import { currentBranch, git, loadProject, projectPath, readText } from '../project.ts';
+import { privateDirectory } from '../state.ts';
 
 // The marker keeps two repositories with the same name from sharing a folder.
 export function taskWorkspace(root: string, id: string) {

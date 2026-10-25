@@ -1,11 +1,11 @@
-import type { PackageMetadata } from './types.ts';
+import type { PackageMetadata } from '../types.ts';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { AUTHOR_ERROR, authors, eligibleReviewers, personalRoot } from './flow-config.ts';
-import { currentBranch, loadProject } from './project.ts';
-import { packageStatus } from './package.ts';
-import { pluginRoot } from './runtime.ts';
+import { AUTHOR_ERROR, authors, eligibleReviewers, personalRoot } from '../flow-config.ts';
+import { currentBranch, loadProject } from '../project.ts';
+import { packageStatus } from '../install/package.ts';
+import { pluginRoot } from '../runtime.ts';
 import { stacksDirectory } from './bootstrap.ts';
 
 export function doctor(cwd: string, author?: string) {

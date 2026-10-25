@@ -21,10 +21,16 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
 import { parseCommand } from '../core/cli.ts';
-import { doctor } from '../core/doctor.ts';
+import { doctor } from '../core/setup/doctor.ts';
 import { handle, pluginRoot, quote } from '../core/runtime.ts';
-import { recoverReview, reviewKey } from '../core/review.ts';
-import { handoffTask, resumeTask, startTask, readTask, taskWorkspace } from '../core/tasks.ts';
+import { recoverReview, reviewKey } from '../core/workflow/review.ts';
+import {
+  handoffTask,
+  resumeTask,
+  startTask,
+  readTask,
+  taskWorkspace,
+} from '../core/workflow/tasks.ts';
 import { loadProject } from '../core/project.ts';
 import { sessionKey, withState } from '../core/state.ts';
 
@@ -261,7 +267,7 @@ test('README setup and task-start work in an isolated HOME and repository', (t) 
     });
   run('install-user', '--apply');
   const proposal = JSON.parse(run('setup', '.')) as ReturnType<
-    typeof import('../core/setup.ts').proposeSetup
+    typeof import('../core/setup/setup.ts').proposeSetup
   >;
   proposal.config.workflow.reviewers = { claude: {} };
   const path = join(home, 'proposal.json');

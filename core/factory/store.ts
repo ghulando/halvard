@@ -1,4 +1,4 @@
-import type { FactoryJob } from './types.ts';
+import type { FactoryJob } from '../types.ts';
 import { randomUUID } from 'node:crypto';
 import {
   appendFileSync,
@@ -13,7 +13,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { privateDirectory } from './state.ts';
+import { privateDirectory } from '../state.ts';
 
 // Factory jobs, logs and worktrees live outside the repository and outside the team
 // workspace, whose files the guard treats by writer prefix.

@@ -1,5 +1,5 @@
-import type { Action, ProjectConfig } from './types.ts';
-import { matches } from './project.ts';
+import type { Action, ProjectConfig } from '../types.ts';
+import { matches } from '../project.ts';
 
 // One contract for managed status rendering and completion detection.
 export function completionStatus(marker: string) {

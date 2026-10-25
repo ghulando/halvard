@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
 import { completeTask, handle, runGate } from '../core/runtime.ts';
-import { runReview } from '../core/review.ts';
+import { runReview } from '../core/workflow/review.ts';
 import { factoryConfig } from '../core/flow-config.ts';
 import { loadProject } from '../core/project.ts';
 import {
@@ -25,11 +25,11 @@ import {
   planIntact,
   readTask,
   startTask,
-} from '../core/tasks.ts';
+} from '../core/workflow/tasks.ts';
 import { sessionKey } from '../core/state.ts';
-import { agentCommand, agentEnv, agentStatus } from '../core/factory-harness.ts';
-import { factoryCommand } from '../core/factory.ts';
-import { loadJob } from '../core/factory-store.ts';
+import { agentCommand, agentEnv, agentStatus } from '../core/factory/harness.ts';
+import { factoryCommand } from '../core/factory/pipeline.ts';
+import { loadJob } from '../core/factory/store.ts';
 import { env, repo, stubs } from './factory-stubs.ts';
 
 const bash = (root: string, command: string, extra = {}) =>

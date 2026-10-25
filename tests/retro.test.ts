@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import test from 'node:test';
-import { retroEvents } from '../core/retro.ts';
+import { retroEvents } from '../core/workflow/retro.ts';
 
 const request = 'a'.repeat(64);
 const protectedBranch = 'No work on protected branch main. Create a feature or fix branch first.';

@@ -1,9 +1,9 @@
-import type { AutoMergeConfig, FactoryJob } from './types.ts';
+import type { AutoMergeConfig, FactoryJob } from '../types.ts';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { jobEvents } from './factory-board.ts';
-import { baseRef, exec, gh } from './factory-ship.ts';
-import { jobFile, listJobs, recordEvent } from './factory-store.ts';
-import { matches } from './project.ts';
+import { jobEvents } from './board.ts';
+import { baseRef, exec, gh } from './ship.ts';
+import { jobFile, listJobs, recordEvent } from './store.ts';
+import { matches } from '../project.ts';
 
 const DAY = 24 * 3600 * 1000;
 // Commits to the same files this long after a merge count as human edits after it.
@@ -103,17 +103,18 @@ type Check = {
   state?: string;
 };
 
+// A commit status has a state; a check run has a status and, once completed, a conclusion.
+function checkState(check: Check) {
+  if (check.state !== undefined) return check.state;
+  if (check.status === 'COMPLETED') return check.conclusion ?? '';
+  return check.status ?? '';
+}
+
 // A pull request with no checks is not green: nothing showed that it works. Every required
 // check must be there and have succeeded, so one quick bot success is not enough.
 export function ciState(rollup: Check[], required: string[] = []) {
   if (!rollup.length) return 'none' as const;
-  const states = rollup.map((check) =>
-    check.state !== undefined
-      ? check.state
-      : check.status === 'COMPLETED'
-        ? (check.conclusion ?? '')
-        : (check.status ?? ''),
-  );
+  const states = rollup.map(checkState);
   if (states.some((state) => !PASSED.has(state) && !PENDING.has(state))) return 'red' as const;
   const names = new Set(rollup.map((check) => check.name ?? check.context));
   if (required.some((name) => !names.has(name))) return 'pending' as const;
@@ -149,13 +150,21 @@ function objection(pull: Pull) {
 // files and for a revert. base is the branch as the main checkout sees it after a fetch.
 function fetchOutcome(
   root: string,
-  job: FactoryJob,
-  facts: Shipped,
-  base: string,
-  windowDays: number,
-  others: Set<string>,
-  now: Date,
-  required: string[],
+  { job, facts }: Tracked,
+  {
+    base,
+    windowDays,
+    others,
+    now,
+    required,
+  }: {
+    base: string;
+    windowDays: number;
+    // Merge commits of the factory's own pull requests, which are not human edits.
+    others: Set<string>;
+    now: Date;
+    required: string[];
+  },
 ): Outcome | null {
   const view = gh(root, [
     'pr',
@@ -221,6 +230,7 @@ export interface Tracked {
 
 // When fetching a pull request last failed, so a failing one waits an hour, not one poll.
 const failed = new Map<string, number>();
+const failKey = (root: string, entry: Tracked) => `${root}\0${entry.job.id}`;
 
 // Every job that opened a pull request, with the outcome last fetched for it.
 export const trackedJobs = (root: string): Tracked[] =>
@@ -251,7 +261,7 @@ export function refreshOutcomes(
     now.getTime() -
       Math.max(
         entry.outcome ? Date.parse(entry.outcome.checkedAt) : 0,
-        failed.get(`${root}\0${entry.job.id}`) ?? 0,
+        failed.get(failKey(root, entry)) ?? 0,
       ) >=
       REFRESH_MS;
   const stale = tracked.filter((entry) => !entry.outcome?.final && due(entry));
@@ -261,21 +271,12 @@ export function refreshOutcomes(
     tracked.flatMap(({ outcome }) => (outcome?.mergeCommit ? [outcome.mergeCommit] : [])),
   );
   for (const entry of stale) {
-    const outcome = fetchOutcome(
-      root,
-      entry.job,
-      entry.facts,
-      base,
-      windowDays,
-      others,
-      now,
-      required,
-    );
+    const outcome = fetchOutcome(root, entry, { base, windowDays, others, now, required });
     if (!outcome) {
-      failed.set(`${root}\0${entry.job.id}`, now.getTime());
+      failed.set(failKey(root, entry), now.getTime());
       continue;
     }
-    failed.delete(`${root}\0${entry.job.id}`);
+    failed.delete(failKey(root, entry));
     saveOutcome(root, entry.job.id, outcome);
     entry.outcome = outcome;
   }
@@ -299,8 +300,8 @@ export function trackRecord(tracked: Tracked[], name: string, before: number, wi
   );
   const clean = merged.filter(({ outcome }) => !humanEdited(outcome!)).length;
   const reverts = tracked.filter(({ facts, outcome }) => {
-    if (facts.class !== name || !outcome) return false;
-    const at = outcome!.revertedAt ? Date.parse(outcome!.revertedAt) : NaN;
+    if (facts.class !== name || !outcome?.revertedAt) return false;
+    const at = Date.parse(outcome.revertedAt);
     return at < before && at >= before - windowDays * DAY;
   }).length;
   return {

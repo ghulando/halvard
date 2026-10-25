@@ -21,12 +21,12 @@ import test from 'node:test';
 import { handle, pluginRoot, quote, runGate } from '../core/runtime.ts';
 import { sessionKey, fingerprint, stateDirectory, withState } from '../core/state.ts';
 import { hookOutput } from '../adapters/hooks.ts';
-import { install, installPlan } from '../core/install.ts';
+import { install, installPlan } from '../core/install/install.ts';
 import { loadProject } from '../core/project.ts';
 import { skills } from '../core/context.ts';
-import { evaluatePolicy } from '../core/policy.ts';
-import { commands } from '../core/shell.ts';
-import { startTask } from '../core/tasks.ts';
+import { evaluatePolicy } from '../core/guard/policy.ts';
+import { commands } from '../core/guard/shell.ts';
+import { startTask } from '../core/workflow/tasks.ts';
 
 function fixture(t: TestContext, overrides = {}) {
   const root = mkdtempSync(join(tmpdir(), 'workflow-test-'));
@@ -767,7 +767,7 @@ test('native edits preview full contents and post hooks accept already-applied e
 });
 
 test('patch previews honor anchors, EOF, original-file chunks and append-only updates', async (t) => {
-  const { previewPatch } = await import('../core/tools.ts');
+  const { previewPatch } = await import('../core/guard/tools.ts');
   const root = realpathSync(fixture(t));
   writeFileSync(join(root, 'source.txt'), 'first\nrepeat\nsecond\nrepeat\n');
   const preview = (body: string) =>

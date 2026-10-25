@@ -11,16 +11,17 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
 import { factoryConfig } from '../core/flow-config.ts';
-import { boxCommand } from '../core/factory-container.ts';
-import { factoryCommand } from '../core/factory.ts';
-import { jobEvents } from '../core/factory-board.ts';
-import { loadJob } from '../core/factory-store.ts';
+import { boxCommand } from '../core/factory/container.ts';
+import { factoryCommand } from '../core/factory/pipeline.ts';
+import { jobEvents } from '../core/factory/board.ts';
+import { loadJob } from '../core/factory/store.ts';
 import { pluginRoot } from '../core/runtime.ts';
 import { env, repo, stubs } from './factory-stubs.ts';
 
@@ -418,6 +419,27 @@ test('mounts that reach runner-owned paths are refused, and listed variables rea
       'status',
     ]),
     /overlaps \/var\/run/,
+  );
+  // A link under an owned folder reaches it by its name even when it points elsewhere, as
+  // Docker Desktop's /var/run/docker.sock does.
+  const elsewhere = mkdtempSync(join(tmpdir(), 'halvard-elsewhere-'));
+  t.after(() => rmSync(elsewhere, { recursive: true, force: true }));
+  mkdirSync(process.env.HALVARD_FACTORY_HOME!, { recursive: true });
+  const link = join(process.env.HALVARD_FACTORY_HOME!, 'elsewhere');
+  symlinkSync(elsewhere, link);
+  await assert.rejects(
+    factoryCommand(containerRepo(t, { mounts: [`${link}:/elsewhere`] }), ['status']),
+    /overlaps .* which the runner owns/,
+  );
+  // A link further up the name hides the owned folder just the same, also when the last
+  // name is itself a link.
+  mkdirSync(join(elsewhere, 'sub'));
+  const other = mkdtempSync(join(tmpdir(), 'halvard-other-'));
+  t.after(() => rmSync(other, { recursive: true, force: true }));
+  symlinkSync(other, join(elsewhere, 'sub', 'out'));
+  await assert.rejects(
+    factoryCommand(containerRepo(t, { mounts: [`${link}/sub/out:/out`] }), ['status']),
+    /overlaps .* which the runner owns/,
   );
   assert.throws(
     () => factoryConfig({ container: { image: 'x', env: ['PATH'] } }),

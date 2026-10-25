@@ -1,4 +1,4 @@
-import type { InstallationPlan } from './types.ts';
+import type { InstallationPlan } from '../types.ts';
 import {
   cpSync,
   existsSync,

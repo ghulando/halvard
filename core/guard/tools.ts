@@ -5,7 +5,7 @@ import type {
   EditPairInput,
   FileChange,
   Action,
-} from './types.ts';
+} from '../types.ts';
 import {
   inside,
   matches,
@@ -14,8 +14,8 @@ import {
   projectPath,
   readText,
   singleLink,
-} from './project.ts';
-import { workspaceRoot } from './flow-config.ts';
+} from '../project.ts';
+import { workspaceRoot } from '../flow-config.ts';
 import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 

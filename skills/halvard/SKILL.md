@@ -15,6 +15,8 @@ Substantial tasks use [halvard-spec](../halvard-spec/SKILL.md) for observable ac
 
 For existing work, use `task-resume <task-file>` and [halvard-handoff](../halvard-handoff/SKILL.md). Recorded progress is context to verify, not proof.
 
+A task with an Approved plan section was approved before this session: implement that plan without stopping for another approval, and never edit the section, because a changed section voids the approval and blocks completion. When the prompt says this is an unattended factory run, nobody can answer: do not ask questions or request approvals, record decisions in the task, stop after the gate passes, and leave review, completion and commits to the factory runner. End the final message with `STATUS: READY`, or `STATUS: BLOCKED: <reason>` when a requirement contradicts itself, needs a product decision or the environment fails.
+
 ## Implement
 
 Load [halvard-understand](../halvard-understand/SKILL.md) for unfamiliar code, [halvard-design](../halvard-design/SKILL.md) for consequential interface choices, and [halvard-implement](../halvard-implement/SKILL.md) for implementation slices. Use [halvard-debug](../halvard-debug/SKILL.md) for defects and [halvard-test](../halvard-test/SKILL.md) when writing tests. Use [halvard-write](../halvard-write/SKILL.md) for text another agent or a program reads. Read required and relevant project stack skills before editing. Name only skills actually loaded; do not read the whole catalog.

@@ -5,8 +5,8 @@ import type {
   ReviewRecord,
   ReviewVerdict,
   ReviewerSettings,
-} from './types.ts';
-import { HARNESSES } from './types.ts';
+} from '../types.ts';
+import { HARNESSES } from '../types.ts';
 import { spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -21,11 +21,11 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { assignment, reviewerChoices, reviewerSettings } from './flow-config.ts';
-import { skills } from './context.ts';
-import { currentBranch, git, loadProject, matches, projectPath } from './project.ts';
+import { assignment, reviewerChoices, reviewerSettings } from '../flow-config.ts';
+import { skills } from '../context.ts';
+import { currentBranch, git, loadProject, matches, projectPath } from '../project.ts';
 import { readTask, taskWorkspace } from './tasks.ts';
-import { digest, fingerprint, stateDirectory, withState } from './state.ts';
+import { digest, fingerprint, stateDirectory, withState } from '../state.ts';
 
 export function reviewCommand(
   reviewer: string,

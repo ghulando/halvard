@@ -132,7 +132,136 @@ export interface ProjectConfig {
   extensions: string[];
   stack: StackStamp | null;
   team: TeamConfig | null;
+  factory: FactoryConfig | null;
   workflow: FlowConfig;
+}
+
+// Factory mode: a runner drives headless harnesses through one task and ships the result.
+export interface FactoryConfig {
+  author: Harness;
+  // Reviewer preference for the first round; later rounds keep the first round's reviewer.
+  reviewers: string[];
+  setup: string[][];
+  auth: Partial<Record<Harness, 'api' | 'subscription'>>;
+  harnessArgs: Partial<Record<Harness, string[]>>;
+  // Wall-clock limits in seconds.
+  timeouts: { plan: number; build: number };
+  // Claude's --max-budget-usd for each agent run.
+  budgetUsd: number;
+  // Agent runs after the first build that fix a failed gate or a blocked review.
+  maxFixPasses: number;
+  draft: boolean;
+  riskPaths: string[];
+  // Agent spend per calendar month (UTC); the daemon claims no new work past 90% of it.
+  monthlyUsd: number;
+  // How often factory serve polls GitHub, in seconds.
+  pollSeconds: number;
+  // A second harness writes acceptance tests the builder may not change.
+  tests: { by: Harness; dir: string } | null;
+  // Jobs factory serve works at the same time.
+  concurrency: number;
+  // When set, every job gets its own clone, and agents, setup, the gate and the review run
+  // in containers of this image.
+  container: ContainerConfig | null;
+  // Checks kept outside the repository that the runner runs after the gate passes.
+  holdout: HoldoutCheck[];
+  autoMerge: AutoMergeConfig;
+  // A weekly digest of review findings and parked jobs becomes a job that edits guidance.
+  retro: RetroConfig | null;
+}
+
+export interface HoldoutCheck {
+  name: string;
+  // A host folder the check reads its scenarios from; the agent's container never mounts it.
+  dir: string;
+  command: string[];
+  // The share of jobs the check runs on, chosen from the job id so a retry runs the same set.
+  sample: number;
+  // A failed blocking check parks the job; any other result goes into the evidence.
+  blocking: boolean;
+}
+
+export interface AutoMergeConfig {
+  // Off by default; the repository variable FACTORY_AUTOMERGE must also read on.
+  enabled: boolean;
+  // Change classes by path pattern; a pull request is in a class when every file matches it.
+  classes: Record<string, string[]>;
+  // Track record a class needs: merged pull requests, and the share of them no human edited.
+  minPrs: number;
+  minCleanRate: number;
+  maxLines: number;
+  // No revert of a pull request in the class within this many days.
+  windowDays: number;
+  // Check names that must have succeeded; any check, so a bot's quick success is not enough.
+  requiredChecks: string[];
+}
+
+export interface RetroConfig {
+  everyDays: number;
+  // The only files a retro job may change.
+  paths: string[];
+}
+
+export interface ContainerConfig {
+  image: string;
+  // A Docker network whose egress you limit; none gives no network at all.
+  network: string;
+  // Names of host variables passed into the containers, such as model API keys.
+  env: string[];
+  // Extra bind mounts, host:container[:ro], such as a harness login file.
+  mounts: { host: string; container: string; readonly: boolean }[];
+  // The Halvard runner inside the image.
+  runner: string;
+  memory: string | null;
+  cpus: number | null;
+}
+
+export type FactoryStage =
+  | 'awaiting-plan'
+  | 'planning'
+  | 'awaiting-approval'
+  | 'approved'
+  | 'testing'
+  | 'building'
+  | 'gating'
+  | 'reviewing'
+  | 'shipping'
+  | 'committed'
+  | 'pr-open'
+  | 'parked';
+
+export interface FactoryJob {
+  version: 1;
+  id: string;
+  repo: string;
+  title: string;
+  issue: { number: number; url: string } | null;
+  small: boolean;
+  fix: boolean;
+  author: Harness;
+  stage: FactoryStage;
+  worktree: string | null;
+  branch: string | null;
+  task: string | null;
+  // proposedAt is when the plan went to the issue; a label added before it approves nothing.
+  plan: {
+    digest: string;
+    approvedBy: string | null;
+    at: string | null;
+    proposedAt?: string | null;
+  } | null;
+  reviewer: string | null;
+  round: number;
+  fixPasses: number;
+  parked: { reason: string; detail: string; at?: string } | null;
+  // The frozen acceptance tests: their folder and a digest of every file in it.
+  tests?: { dir: string; digest: string } | null;
+  // Files the job may change besides its task file; set for retro jobs.
+  scope?: string[] | null;
+  pr: string | null;
+  costUsd: number;
+  created: string;
+  updated: string;
 }
 
 export interface TeamConfig {
@@ -221,6 +350,8 @@ export interface TaskMetadata {
   base: string;
   small?: boolean;
   reviewCycle?: string;
+  // An approved plan: the SHA-256 of the task's Approved plan section and who approved it.
+  plan?: { digest: string; approvedBy: string; at: string };
 }
 
 export interface Task {

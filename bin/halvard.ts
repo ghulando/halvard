@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { parseCommand } from '../core/cli.ts';
+import { readFileSync } from 'node:fs';
 import { approveFromTerminal, runGate } from '../core/runtime.ts';
 
 const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
@@ -14,6 +15,9 @@ const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
   bootstrap <repo>                 Print stack records and repo state as JSON
   bootstrap-apply <repo> <plan>     Apply a confirmed, current bootstrap plan
   task-start <id> <title> --author <harness> [--fix] [--small]
+             [--brief <file>] [--base <ref>] [--plan <file> --approved-by <name>]
+  task-done <task-file> --gate-session <session-key> [--plan <digest>|none]
+                                    Mark done when the session's gate and the review cover this tree
   task-resume <task-file>           Read portable task and current worktree
   task-handoff <task-file> --author <harness>
   review <task-file> --author <harness> --reviewer claude|codex|grok|cursor|ollama --round <number> --gate-session <session-key>
@@ -25,6 +29,8 @@ const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
   review-status <task-file>         Show recorded independent reviews
   gate <session-key>               Run configured checks for this session
   approve <session-key> <request>  Approve one guarded operation; run it in your own terminal
+  factory <plan|approve|build|run|status> ...
+                                    Run the software factory; see docs/factory.md
   history-plan --harness claude,pi,codex|all  Preview history and save a private plan
   history-digest --harness claude,pi,codex|all  Print compact session digests
   history-clean <plan-file> --confirm DELETE  Delete reviewed entries, skipping changed ones
@@ -41,6 +47,10 @@ try {
   const [command, ...args] = process.argv.slice(2);
   if (!command || command === '--help' || command === 'help') {
     process.stdout.write(help);
+  } else if (command === 'factory') {
+    // The factory has its own subcommand grammar.
+    const { factoryCommand } = await import('../core/factory/pipeline.ts');
+    await factoryCommand(process.cwd(), args);
   } else {
     const { positional, flags } = parseCommand(command, args);
     switch (command) {
@@ -48,7 +58,7 @@ try {
       case 'history-digest':
       case 'history-clean': {
         const { planClean, saveCleanPlan, digestHistory, applyClean, historyHarnesses } =
-          await import('../core/clean-history.ts');
+          await import('../core/workflow/clean-history.ts');
         if (command === 'history-clean') {
           print(applyClean(positional[0]!, flags.confirm as string));
         } else if (command === 'history-digest') {
@@ -68,20 +78,20 @@ try {
         );
         break;
       case 'team': {
-        const { setTeam, showTeam } = await import('../core/team.ts');
+        const { setTeam, showTeam } = await import('../core/workflow/team.ts');
         if (positional[0] === 'show') print(showTeam(process.cwd()));
         else if (positional[0] === 'set') print(setTeam(process.cwd(), flags));
         else throw new Error('team takes show or set');
         break;
       }
       case 'retro-events': {
-        const { retroEvents } = await import('../core/retro.ts');
+        const { retroEvents } = await import('../core/workflow/retro.ts');
         print(await retroEvents(process.cwd(), positional[0]!));
         break;
       }
       case 'install':
       case 'install-plan': {
-        const { install, installPlan } = await import('../core/install.ts');
+        const { install, installPlan } = await import('../core/install/install.ts');
         if (command === 'install-plan') {
           print(installPlan(positional[0]!, flags));
         } else {
@@ -91,7 +101,7 @@ try {
       }
       case 'install-user': {
         const { personalInstallPlan, installPersonal } =
-          await import('../core/personal-install.ts');
+          await import('../core/install/personal.ts');
         const options = { repair: flags.repair as boolean | undefined };
         print(
           flags.apply
@@ -101,56 +111,80 @@ try {
         break;
       }
       case 'setup': {
-        const { proposeSetup } = await import('../core/setup.ts');
+        const { proposeSetup } = await import('../core/setup/setup.ts');
         print(proposeSetup(positional[0]!));
         break;
       }
       case 'setup-apply': {
-        const { applySetup } = await import('../core/setup.ts');
+        const { applySetup } = await import('../core/setup/setup.ts');
         print(applySetup(positional[0]!, positional[1]!));
         break;
       }
       case 'bootstrap': {
-        const { bootstrapReport } = await import('../core/bootstrap.ts');
+        const { bootstrapReport } = await import('../core/setup/bootstrap.ts');
         print(bootstrapReport(positional[0]!));
         break;
       }
       case 'bootstrap-apply': {
-        const { applyBootstrap } = await import('../core/bootstrap.ts');
+        const { applyBootstrap } = await import('../core/setup/bootstrap.ts');
         print(applyBootstrap(positional[0]!, positional[1]!));
         break;
       }
       case 'doctor': {
-        const { doctor } = await import('../core/doctor.ts');
+        const { doctor } = await import('../core/setup/doctor.ts');
         const result = doctor(process.cwd(), flags.author as string);
         print(result);
         if (result.issues.length) process.exitCode = 1;
         break;
       }
       case 'task-start': {
-        const { startTask } = await import('../core/tasks.ts');
+        const { startTask } = await import('../core/workflow/tasks.ts');
+        const text = (name: string) =>
+          typeof flags[name] === 'string' ? readFileSync(flags[name], 'utf8') : undefined;
         print(
           startTask(process.cwd(), {
             id: positional[0]!,
             title: positional[1]!,
-            ...flags,
             author: flags.author as string,
+            fix: flags.fix === true,
+            small: flags.small === true,
+            brief: text('brief'),
+            base: flags.base as string | undefined,
+            plan: text('plan'),
+            approvedBy: flags['approved-by'] as string | undefined,
           }),
         );
         break;
       }
+      case 'task-done': {
+        const { completeTask } = await import('../core/runtime.ts');
+        // A runner passes the approved plan's digest it holds, or none for a task without one.
+        const plan = flags.plan as string | undefined;
+        if (plan !== undefined && plan !== 'none' && !/^[a-f0-9]{64}$/.test(plan)) {
+          throw new Error('--plan takes a plan digest or none');
+        }
+        print(
+          await completeTask(
+            process.cwd(),
+            positional[0]!,
+            flags['gate-session'] as string,
+            plan === undefined ? undefined : { plan: plan === 'none' ? null : plan },
+          ),
+        );
+        break;
+      }
       case 'task-resume': {
-        const { resumeTask } = await import('../core/tasks.ts');
+        const { resumeTask } = await import('../core/workflow/tasks.ts');
         print(resumeTask(process.cwd(), positional[0]!));
         break;
       }
       case 'task-handoff': {
-        const { handoffTask } = await import('../core/tasks.ts');
+        const { handoffTask } = await import('../core/workflow/tasks.ts');
         print(handoffTask(process.cwd(), positional[0]!, flags.author as string));
         break;
       }
       case 'review': {
-        const { runReview } = await import('../core/review.ts');
+        const { runReview } = await import('../core/workflow/review.ts');
         const result = await runReview(process.cwd(), positional[0]!, {
           ...flags,
           author: flags.author as string,
@@ -163,7 +197,7 @@ try {
         break;
       }
       case 'review-recover': {
-        const { recoverReview } = await import('../core/review.ts');
+        const { recoverReview } = await import('../core/workflow/review.ts');
         print(
           await recoverReview(process.cwd(), positional[0]!, {
             stoppedReviewer: flags['stopped-reviewer'] as boolean | undefined,
@@ -173,8 +207,8 @@ try {
       }
       case 'review-status': {
         const { loadProject } = await import('../core/project.ts');
-        const { readTask } = await import('../core/tasks.ts');
-        const { reviewKey } = await import('../core/review.ts');
+        const { readTask } = await import('../core/workflow/tasks.ts');
+        const { reviewKey } = await import('../core/workflow/review.ts');
         const { withState } = await import('../core/state.ts');
         const project = loadProject(process.cwd());
         const task = readTask(project, positional[0]!);

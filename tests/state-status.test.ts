@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fingerprint, sessionKey } from '../core/state.ts';
 import { handle, runGate } from '../core/runtime.ts';
-import { claimsDone } from '../core/status.ts';
+import { claimsDone } from '../core/workflow/status.ts';
 
 function repo(t: TestContext, config = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'workflow-state-status-')));

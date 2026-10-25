@@ -8,13 +8,13 @@ import type {
   PackageStatus,
   LinkPlan,
   InstallOptions,
-} from './types.ts';
+} from '../types.ts';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
-import { CONFIG, inside, projectPath } from './project.ts';
-import { applyInstallation } from './install-transaction.ts';
+import { CONFIG, inside, projectPath } from '../project.ts';
+import { applyInstallation } from './transaction.ts';
 import { packageStatus } from './package.ts';
-import { pluginRoot } from './runtime.ts';
+import { pluginRoot } from '../runtime.ts';
 
 function json<T>(path: string, fallback: T = {} as T): T {
   const parsed: unknown = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : fallback;

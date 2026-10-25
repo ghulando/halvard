@@ -1,4 +1,4 @@
-import type { FlowConfig, ProjectConfig, StackStamp } from './types.ts';
+import type { FlowConfig, ProjectConfig, StackStamp } from '../types.ts';
 import {
   existsSync,
   lstatSync,
@@ -18,9 +18,9 @@ import {
   projectPath,
   readText,
   singleLink,
-} from './project.ts';
-import { fingerprint } from './state.ts';
-import { skills } from './context.ts';
+} from '../project.ts';
+import { fingerprint } from '../state.ts';
+import { skills } from '../context.ts';
 import { proposeSetup } from './setup.ts';
 
 const AGENTS = 'AGENTS.md';

@@ -27,7 +27,7 @@ import {
   historyHarnesses,
   planClean,
   saveCleanPlan,
-} from '../core/clean-history.ts';
+} from '../core/workflow/clean-history.ts';
 import { skills } from '../core/context.ts';
 import { loadProject } from '../core/project.ts';
 import { pluginRoot } from '../core/runtime.ts';

@@ -130,10 +130,11 @@ export function agentCommand(
       ...(stage === 'plan'
         ? ['--permission-mode', 'dontAsk', '--allowedTools', 'Read,Grep,Glob,Bash']
         : ['--permission-mode', 'acceptEdits', '--allowedTools', 'Bash,Read,Edit,Write,Glob,Grep']),
+      // --add-dir and --allowedTools take lists and would swallow a trailing prompt, so
+      // Claude reads it on stdin.
       '--add-dir',
       workspace,
       ...extra,
-      prompt,
     ];
   }
   if (harness === 'grok') {
@@ -316,7 +317,7 @@ export function runAgent(
     });
     child.stderr.on('data', (data: Buffer) => writeSync(fd, data));
     child.stdin.on('error', () => {});
-    child.stdin.end(harness === 'codex' ? prompt : '');
+    child.stdin.end(harness === 'codex' || harness === 'claude' ? prompt : '');
     child.on('error', (error) =>
       finish({ text: '', costUsd: 0, exitCode: null, timedOut, error: error.message }),
     );

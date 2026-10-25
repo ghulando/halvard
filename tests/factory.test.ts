@@ -5,15 +5,18 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { completeTask, handle, runGate } from '../core/runtime.ts';
 import { runReview } from '../core/workflow/review.ts';
 import { factoryConfig } from '../core/flow-config.ts';
@@ -30,6 +33,7 @@ import { sessionKey } from '../core/state.ts';
 import { agentCommand, agentEnv, agentStatus } from '../core/factory/harness.ts';
 import { factoryCommand } from '../core/factory/pipeline.ts';
 import { loadJob } from '../core/factory/store.ts';
+import { jobEvents } from '../core/factory/board.ts';
 import { env, repo, stubs } from './factory-stubs.ts';
 
 const bash = (root: string, command: string, extra = {}) =>
@@ -636,4 +640,245 @@ test('job files are checked, retries never touch other paths, and a live run blo
     factoryCommand(root, ['run', '--brief', brief, '--title', 'X', '--id', 'other', '--no-push']),
     /is running/,
   );
+});
+
+const writeBrief = (t: TestContext, root: string, text: string) => {
+  const file = join(root, '..', `brief-${basename(root)}.md`);
+  writeFileSync(file, text);
+  t.after(() => rmSync(file, { force: true }));
+  return file;
+};
+
+const withOrigin = (t: TestContext, root: string) => {
+  const origin = realpathSync(mkdtempSync(join(tmpdir(), 'workflow-factory-origin-')));
+  t.after(() => rmSync(origin, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', '--bare', origin]);
+  execFileSync('git', ['remote', 'add', 'origin', origin], { cwd: root });
+  execFileSync('git', ['push', '-q', 'origin', 'main'], { cwd: root });
+  return origin;
+};
+
+test('each run writes the board and a job page with its whole record', async (t) => {
+  const root = repo(t);
+  stubs(t);
+  const brief = writeBrief(t, root, 'Append implemented to source.txt. <script>x</script>');
+  await factoryCommand(root, [
+    'run',
+    '--brief',
+    brief,
+    '--title',
+    'Paged',
+    '--id',
+    'paged',
+    '--no-push',
+  ]);
+  const home = join(process.env.HALVARD_FACTORY_HOME!, basename(root));
+  const page = join(home, 'jobs', 'paged', 'job.html');
+  const board = readFileSync(join(home, 'board.html'), 'utf8');
+  assert.ok(board.includes(`href="${pathToFileURL(page).href}"`));
+  const html = readFileSync(page, 'utf8');
+  assert.match(html, /agent.log, last lines/);
+  assert.match(html, /gate passed/);
+  assert.match(html, /review round 1 by grok: pass/);
+  assert.match(html, /&lt;script&gt;x&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script/i);
+  assert.ok(html.includes(pathToFileURL(join(home, 'board.html')).href));
+
+  // A parked job gets its page too, with the reason.
+  env(t, { STUB_AGENT: 'blocked' });
+  await factoryCommand(root, [
+    'run',
+    '--brief',
+    brief,
+    '--title',
+    'Stuck',
+    '--id',
+    'stuck',
+    '--no-push',
+  ]);
+  assert.match(
+    readFileSync(join(home, 'jobs', 'stuck', 'job.html'), 'utf8'),
+    /parked \(agent-blocked\)/,
+  );
+});
+
+test('factory ship pushes the reviewed commit of a committed job and opens its PR', async (t) => {
+  const root = repo(t, {
+    factory: { author: 'claude', reviewers: ['grok', 'cursor'], riskPaths: ['source.txt'] },
+  });
+  const origin = withOrigin(t, root);
+  const calls = stubs(t);
+  const brief = writeBrief(t, root, 'Append implemented to source.txt.');
+  await factoryCommand(root, [
+    'run',
+    '--brief',
+    brief,
+    '--title',
+    'Later',
+    '--id',
+    'later',
+    '--no-push',
+  ]);
+  const committed = loadJob(root, 'later');
+  assert.equal(committed.stage, 'committed', JSON.stringify(committed.parked));
+  assert.equal(calls.github.read().prs.length, 0);
+  const head = execFileSync('git', ['rev-parse', committed.branch!], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+
+  const home = join(process.env.HALVARD_FACTORY_HOME!, basename(root));
+  rmSync(join(home, 'board.html'), { force: true });
+  await factoryCommand(root, ['ship', 'later']);
+  assert.ok(existsSync(join(home, 'board.html')));
+  const page = readFileSync(join(home, 'jobs', 'later', 'job.html'), 'utf8');
+  assert.match(page, /later · pr-open/);
+  assert.match(
+    page,
+    /pr: \{&quot;url&quot;:&quot;https:\/\/github\.com\/example\/repo\/pull\/1&quot;\}/,
+  );
+  const shipped = loadJob(root, 'later');
+  assert.equal(shipped.stage, 'pr-open');
+  assert.equal(shipped.pr, 'https://github.com/example/repo/pull/1');
+  assert.equal(
+    execFileSync('git', ['rev-parse', `refs/heads/${committed.branch}`], {
+      cwd: origin,
+      encoding: 'utf8',
+    }),
+    head,
+  );
+  const args = calls.github.read().prs[0]!.args as string[];
+  assert.equal(args[args.indexOf('--head') + 1], committed.branch);
+  assert.match(args[args.indexOf('--body-file') + 1]!, /later\/evidence\.md$/);
+  assert.ok(args.includes('--draft'));
+  assert.equal(args[args.indexOf('--label') + 1], 'risk:high');
+  const pr = jobEvents(root, 'later').filter((event) => event.event === 'pr');
+  assert.deepEqual(
+    pr.map((event) => event.url),
+    ['https://github.com/example/repo/pull/1'],
+  );
+  await assert.rejects(factoryCommand(root, ['ship', 'later']), /only a committed job ships/);
+});
+
+test('factory ship refuses a moved branch or a repository without origin', async (t) => {
+  const root = repo(t);
+  const origin = withOrigin(t, root);
+  const calls = stubs(t);
+  const brief = writeBrief(t, root, 'Append implemented to source.txt.');
+  await factoryCommand(root, [
+    'run',
+    '--brief',
+    brief,
+    '--title',
+    'Moved',
+    '--id',
+    'moved',
+    '--no-push',
+  ]);
+  const job = loadJob(root, 'moved');
+  writeFileSync(join(job.worktree!, 'source.txt'), 'unreviewed\n');
+  execFileSync('git', ['commit', '-qam', 'unreviewed'], { cwd: job.worktree! });
+  await assert.rejects(factoryCommand(root, ['ship', 'moved']), /not the reviewed commit/);
+  assert.equal(loadJob(root, 'moved').stage, 'committed');
+  assert.equal(calls.github.read().prs.length, 0);
+  assert.equal(
+    execFileSync('git', ['for-each-ref', '--format=%(refname)', 'refs/heads'], {
+      cwd: origin,
+      encoding: 'utf8',
+    }).trim(),
+    'refs/heads/main',
+  );
+
+  const local = repo(t);
+  const localBrief = writeBrief(t, local, 'Append implemented to source.txt.');
+  await factoryCommand(local, [
+    'run',
+    '--brief',
+    localBrief,
+    '--title',
+    'Local',
+    '--id',
+    'local',
+    '--no-push',
+  ]);
+  await assert.rejects(factoryCommand(local, ['ship', 'local']), /no origin remote/);
+  assert.equal(loadJob(local, 'local').stage, 'committed');
+});
+
+test('every command that changes a job rewrites the board, and a failed write fails nothing', async (t) => {
+  const root = repo(t);
+  stubs(t);
+  const home = join(process.env.HALVARD_FACTORY_HOME!, basename(root));
+  const board = join(home, 'board.html');
+  const page = (id: string) => readFileSync(join(home, 'jobs', id, 'job.html'), 'utf8');
+  const fresh = async (args: string[]) => {
+    rmSync(board, { force: true });
+    await factoryCommand(root, args);
+    assert.ok(existsSync(board), `factory ${args[0]} wrote no board`);
+  };
+  const brief = writeBrief(t, root, 'Append implemented to source.txt.');
+  await fresh(['plan', '--brief', brief, '--title', 'Planned', '--id', 'planned']);
+  assert.match(page('planned'), /<h2>Plan<\/h2><pre>## Acceptance criteria/);
+  await fresh(['approve', 'planned']);
+  await fresh(['build', 'planned', '--no-push']);
+  assert.match(page('planned'), /<h2>Evidence<\/h2><pre>Factory job `planned`/);
+
+  await fresh(['plan', '--brief', brief, '--title', 'Waiting', '--id', 'waiting']);
+  await fresh(['stop', 'waiting']);
+  await fresh(['replan', 'waiting']);
+
+  env(t, { STUB_AGENT: 'blocked' });
+  await fresh(['run', '--brief', brief, '--title', 'Parked', '--id', 'parked', '--no-push']);
+  env(t, { STUB_AGENT: 'none' });
+  const note = writeBrief(t, home, 'Try again.');
+  await fresh(['rework', 'parked', '--note', note, '--no-push']);
+  assert.equal(loadJob(root, 'parked').stage, 'committed');
+
+  // Only the last 32 KiB of a log reach the page.
+  const log = join(home, 'jobs', 'parked', 'agent.log');
+  writeFileSync(log, `EARLY-MARKER\n${'x'.repeat(64 * 1024)}\nLATE-MARKER\n`);
+  await factoryCommand(root, ['board']);
+  assert.doesNotMatch(page('parked'), /EARLY-MARKER/);
+  assert.match(page('parked'), /LATE-MARKER/);
+
+  // A board that cannot be written is reported, and the job still ships.
+  rmSync(board, { force: true });
+  mkdirSync(board);
+  await factoryCommand(root, [
+    'run',
+    '--brief',
+    brief,
+    '--title',
+    'Blind',
+    '--id',
+    'blind',
+    '--no-push',
+  ]);
+  assert.equal(loadJob(root, 'blind').stage, 'committed');
+  assert.ok(statSync(board).isDirectory());
+});
+
+test('a job page lists the review findings that blocked it', async (t) => {
+  const root = repo(t);
+  stubs(t);
+  env(t, { STUB_REVIEW: 'blocked' });
+  const brief = writeBrief(t, root, 'Append implemented to source.txt.');
+  await factoryCommand(root, [
+    'run',
+    '--brief',
+    brief,
+    '--title',
+    'Blocked',
+    '--id',
+    'blocked',
+    '--no-push',
+  ]);
+  assert.equal(loadJob(root, 'blocked').parked?.reason, 'review-blocked');
+  const html = readFileSync(
+    join(process.env.HALVARD_FACTORY_HOME!, basename(root), 'jobs', 'blocked', 'job.html'),
+    'utf8',
+  );
+  assert.match(html, /review round 2 by grok: blocked, 1 finding/);
+  assert.match(html, /<li><strong>blocking<\/strong> source.txt:1: Wrong text<\/li>/);
+  assert.match(html, /parked \(review-blocked\)/);
 });

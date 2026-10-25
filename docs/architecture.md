@@ -118,7 +118,7 @@ flowchart TB
 
     subgraph halvard["Halvard [Software System]"]
         factory["<b>Factory runner</b><br/>[Container: Node.js process]<br/>halvard factory: plans, builds, checks and ships jobs; serve polls GitHub"]
-        jobs[("<b>Factory store</b><br/>[Container: files in ~/.halvard-factory]<br/>Job files, events, evidence, outcomes, board")]
+        jobs[("<b>Factory store</b><br/>[Container: files in ~/.halvard-factory]<br/>Job files, events, evidence, outcomes, board and job pages")]
         cli["<b>halvard CLI</b><br/>[Container: Node.js process]<br/>gate, review, task-done for the runner"]
         hook["<b>Hook guard</b><br/>[Container: Node.js process]<br/>Turns every ask into a denial"]
         state[("<b>Workflow state</b><br/>[Container: files]<br/>The job's gate receipts and review records")]
@@ -223,7 +223,7 @@ flowchart TB
         ship["<b>Ship and evidence</b><br/>[Component: TypeScript]<br/>Git helpers, changed files, risk, pull request body"]
         outcomes["<b>Outcomes and auto-merge</b><br/>[Component: TypeScript]<br/>Pull request outcomes, classes, track record, merge rules"]
         retro["<b>Retro</b><br/>[Component: TypeScript]<br/>Digest of recurring findings into a guidance job"]
-        board["<b>Board and metrics</b><br/>[Component: TypeScript]<br/>Static HTML board and numbers"]
+        board["<b>Board and metrics</b><br/>[Component: TypeScript]<br/>Static HTML board, job pages and numbers"]
     end
 
     dev -- "Runs factory commands<br/>[CLI]" --> commands
@@ -244,7 +244,8 @@ flowchart TB
     outcomes -- "Reads pull requests, merges<br/>[gh CLI]" --> github
     serve -- "Reads issues and label events<br/>[gh CLI]" --> github
     serve -- "Writes the board after each step with" --> board
-    board -- "Reads events and outcomes<br/>[files]" --> jobs
+    commands -- "Writes the board and job pages after each command with" --> board
+    board -- "Reads events, outcomes and logs, writes the board and job pages<br/>[files]" --> jobs
     outcomes -- "Reads events, writes outcome.json<br/>[files]" --> jobs
     retro -- "Reads events<br/>[files]" --> jobs
     commands -- "Reads briefs and plans<br/>[files]" --> jobs

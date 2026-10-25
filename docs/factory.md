@@ -90,14 +90,15 @@ halvard factory stop issue-42                   # stop a job; a running one stop
 halvard factory rework issue-42 --note note.md  # build a parked job again, with your note for the agent
 halvard factory replan issue-42                 # plan again a job that has no approved plan
 halvard factory serve                           # work labeled issues until Ctrl-C; --once for one pass
-halvard factory board                           # write the HTML board and print its path
+halvard factory ship issue-42                   # push a job built with --no-push and open its PR
+halvard factory board                           # write the HTML board and job pages, and print the board's path
 halvard factory metrics
 halvard factory automerge                       # dry run: which pull requests would have merged by themselves
 halvard factory retro --no-push                 # turn recurring findings into a guidance change now
 halvard factory status [issue-42]
 ```
 
-`--no-push` stops after the commit, which leaves the branch in the job's worktree. The main checkout is never switched or edited.
+`--no-push` stops after the commit, which leaves the branch in the job's worktree. The main checkout is never switched or edited. `factory ship <job>` ships such a job later: it pushes the commit the runner recorded, by its id, and opens the pull request the way `build` would. It refuses when the branch no longer points at that commit, so nothing the gate and review did not cover goes out: move the branch back to the recorded commit to ship it, or push the branch yourself. A failed push or `gh` call leaves the job committed, and you can run `ship` again.
 
 ## Serve
 
@@ -197,7 +198,7 @@ Allow the model API hosts of your harnesses and your package registry. Pass `HTT
 
 ## Board and metrics
 
-`factory board` writes `~/.halvard-factory/<repo>/board.html`: one static page, no script, that your browser reloads every 30 seconds. It shows every job by stage, its reviewer and round, cost, pull request and why it parked, under a row of numbers. `factory metrics` prints the same numbers as JSON:
+`factory board` writes `~/.halvard-factory/<repo>/board.html`: one static page, no script, that your browser reloads every 30 seconds. It shows every job by stage, its reviewer and round, cost, pull request and why it parked, under a row of numbers. `plan`, `approve`, `build`, `run`, `rework`, `replan`, `stop`, `retro` and `ship` write it when they finish, and `serve` after every step. A job's id on its card links to the job's own page, `jobs/<job>/job.html`, with its state, the timeline of agent runs, gates and review findings, the brief, the plan, the evidence and the last lines of each log. All job text shows as escaped text. `factory metrics` prints the same numbers as JSON:
 
 | Number | Meaning |
 | --- | --- |
@@ -309,6 +310,7 @@ Before you use Grok as the author, run the headless probes from the factory rese
 | `…/outcome.json` | What happened to the pull request: state, CI, human commits, later commits to its files, a revert |
 | `…/stop`, `…/rework-<time>.md` | A stop request from `factory stop`, and your rework notes |
 | `…/state` | Container mode: the gate and review receipts, which only runner steps mount |
+| `…/job.html` | The job's page, written with the board |
 | `~/.halvard-factory/<repo>/worktrees/<repo>-<job>` | The job's worktree, or its clone in container mode, on its task branch |
 | `~/.halvard-factory/<repo>/board.html` | The board |
 

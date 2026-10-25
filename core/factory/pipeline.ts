@@ -54,6 +54,7 @@ import {
   type HoldoutResult,
 } from './ship.ts';
 import { changeClass } from './outcomes.ts';
+import { jobEvents, metrics, writeBoard } from './board.ts';
 import { issueSource, labeledBy, type Source } from './github.ts';
 import {
   boxed,
@@ -1249,6 +1250,11 @@ async function ship(
     ['push', '--quiet', run.pushUrl, `HEAD:refs/heads/${job.branch}`],
     PUSH_TIMEOUT_MS,
   );
+  return openPullRequest(ctx, job, risk.level === 'high');
+}
+
+// Opens the job's pull request with its evidence as the body.
+function openPullRequest(ctx: Context, job: FactoryJob, highRisk: boolean) {
   const createPr = (labels: string[]) =>
     gh(ctx.root, [
       'pr',
@@ -1260,20 +1266,55 @@ async function ship(
       '--title',
       job.title,
       '--body-file',
-      evidence,
+      jobFile(ctx.root, job.id, 'evidence.md'),
       ...(ctx.factory.draft ? ['--draft'] : []),
       ...labels,
     ]);
-  let pr = createPr(risk.level === 'high' ? ['--label', 'risk:high'] : []);
+  let pr = createPr(highRisk ? ['--label', 'risk:high'] : []);
   // The label may not exist in the repository; the risk stays in the body.
-  if (pr.status !== 0 && risk.level === 'high') pr = createPr([]);
-  if (pr.status !== 0) throw new Parked('infra', `gh pr create failed: ${pr.stderr.trim()}`);
+  if (pr.status !== 0 && highRisk) pr = createPr([]);
+  if (pr.status !== 0) throw new Error(`gh pr create failed: ${pr.stderr.trim()}`);
   job.pr = pr.stdout.trim();
   job.stage = 'pr-open';
   saveJob(ctx.root, job);
   recordEvent(ctx.root, job.id, 'pr', { url: job.pr });
   say(`${job.id}: opened ${job.pr}`);
   return job;
+}
+
+// Ships a job built with --no-push. Only the commit the runner gated, reviewed and recorded
+// goes out, so the branch must still point at it. A failure leaves the job committed.
+function shipJob(ctx: Context, id: string) {
+  const unlock = lockJob(ctx.root, id);
+  try {
+    const job = loadJob(ctx.root, id);
+    if (job.stage !== 'committed') {
+      throw new Error(`job ${id} is ${job.stage}; only a committed job ships`);
+    }
+    const committed = jobEvents(ctx.root, id)
+      .filter((event) => event.event === 'committed')
+      .at(-1);
+    const head = typeof committed?.head === 'string' ? committed.head : null;
+    if (!head || !job.branch) throw new Error(`job ${id} has no recorded commit to ship`);
+    if (!hasOrigin(ctx.root)) throw new Error('the repository has no origin remote to push to');
+    // The path comes from the job id, never from job.json.
+    const checkout = worktreePath(ctx.root, id);
+    const current = gitRunner(checkout, ['rev-parse', `refs/heads/${job.branch}`]).trim();
+    if (current !== head) {
+      throw new Error(
+        `${job.branch} is at ${current.slice(0, 12)}, not the reviewed commit ${head.slice(0, 12)}; move the branch back to that commit to ship it, or push the branch yourself`,
+      );
+    }
+    const pushUrl = exec('git', ['remote', 'get-url', '--push', 'origin'], ctx.root).stdout.trim();
+    gitRunner(
+      checkout,
+      ['push', '--quiet', pushUrl, `${head}:refs/heads/${job.branch}`],
+      PUSH_TIMEOUT_MS,
+    );
+    return openPullRequest(ctx, job, committed!.risk === 'high');
+  } finally {
+    unlock();
+  }
 }
 
 // Why no work may start: a job parked after tampering, or a job file that does not read.
@@ -1343,12 +1384,13 @@ const usage = `halvard factory commands, run from the repository's main checkout
                                 confirms you checked a job parked after tampering
   factory run --issue <n> | --brief <file> --title <text> --id <slug> [--fix] [--no-push]
                                 Small task: build directly without a plan stage
+  factory ship <job>            Push a job built with --no-push and open its PR
   factory rework <job> --note <file>
                                 Build a parked job again, with your note for the agent
   factory replan <job>          Plan a job again that has no approved plan
   factory stop <job>            Stop a job: a running one at its next step
   factory serve [--once]        Poll labeled issues and work them until stopped
-  factory board [--out <file>]  Write the HTML board and print its path
+  factory board [--out <file>]  Write the HTML board and job pages, and print the board's path
   factory metrics               Print the factory's numbers
   factory automerge             Dry run: which pull requests would have merged by themselves
   factory retro [--since <days>] [--no-push]
@@ -1370,12 +1412,15 @@ const SPECS: Record<string, { count: [number, number]; options: string[] }> = {
   metrics: { count: [0, 0], options: [] },
   automerge: { count: [0, 0], options: [] },
   retro: { count: [0, 0], options: ['since', 'no-push'] },
+  ship: { count: [1, 1], options: [] },
 };
 
 // Commands that only report, or only stop work, run while a job is running.
 const REPORTS = ['status', 'board', 'metrics', 'stop'];
 // serve checks running jobs and blockers itself on every pass, and keeps polling meanwhile.
 const UNCHECKED = [...REPORTS, 'serve'];
+// Commands that change a job write the board when they finish; serve writes it after each step.
+const BOARDED = ['plan', 'approve', 'build', 'run', 'rework', 'replan', 'stop', 'retro', 'ship'];
 
 // Boolean options the shared parser does not already know.
 const FLAGS = new Set(['no-push', 'retry', 'checked', 'once']);
@@ -1398,6 +1443,14 @@ export async function factoryCommand(cwd: string, args: string[]) {
   }
   const ctx = context(cwd);
   const print = (value: unknown) => {
+    // The board is a view of the job files; failing to write it never fails the command.
+    if (BOARDED.includes(verb)) {
+      try {
+        say(`board at ${writeBoard(ctx.root)}`);
+      } catch (err) {
+        say(`board: ${(err as Error).message}`);
+      }
+    }
     process.stdout.write(JSON.stringify(value, null, 2) + '\n');
     // Scripts can tell a parked job from a shipped one; status is only a report.
     if (!REPORTS.includes(verb) && (value as FactoryJob | null)?.stage === 'parked') {
@@ -1421,19 +1474,21 @@ export async function factoryCommand(cwd: string, args: string[]) {
     );
   }
   if (verb === 'board') {
-    const { writeBoard } = await import('./board.ts');
     process.stdout.write(
       writeBoard(ctx.root, typeof flags.out === 'string' ? resolve(flags.out) : undefined) + '\n',
     );
     return;
   }
   if (verb === 'metrics') {
-    const { metrics } = await import('./board.ts');
     print(metrics(ctx.root));
     return;
   }
   if (verb === 'stop') {
     print(stopJob(ctx, positional[0]!));
+    return;
+  }
+  if (verb === 'ship') {
+    print(shipJob(ctx, positional[0]!));
     return;
   }
   if (verb === 'automerge') {

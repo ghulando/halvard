@@ -1,6 +1,16 @@
 import type { FactoryJob } from '../types.ts';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { jobFile, listJobs, repoHome } from './store.ts';
 import { classRates, trackedJobs } from './outcomes.ts';
 
@@ -119,11 +129,15 @@ const COLUMNS: { title: string; stages: string[] }[] = [
   { title: 'Parked', stages: ['parked'] },
 ];
 
-function card(job: FactoryJob) {
-  const link = (url: string | null | undefined, text: string) =>
-    url && /^https:\/\//.test(url) ? `<a href="${escape(url)}">${escape(text)}</a>` : escape(text);
+// Only web links from job files become links; anything else shows as text.
+const link = (url: string | null | undefined, text: string) =>
+  url && /^https:\/\//.test(url) ? `<a href="${escape(url)}">${escape(text)}</a>` : escape(text);
+
+const jobPage = (root: string, id: string) => jobFile(root, id, 'job.html');
+
+function card(root: string, job: FactoryJob) {
   return `<article class="card ${job.stage === 'parked' ? 'parked' : ''}">
-<header><span class="id">${escape(job.id)}</span><span class="stage">${escape(job.stage)}</span></header>
+<header><a class="id" href="${escape(pathToFileURL(jobPage(root, job.id)).href)}">${escape(job.id)}</a><span class="stage">${escape(job.stage)}</span></header>
 <p class="title">${escape(job.title)}</p>
 <dl>
 ${job.issue ? `<dt>Issue</dt><dd>${link(job.issue.url, `#${job.issue.number}`)}</dd>` : ''}
@@ -135,6 +149,27 @@ ${job.parked ? `<dt>Parked</dt><dd><strong>${escape(job.parked.reason)}</strong>
 </dl>
 </article>`;
 }
+
+const STYLE = `
+:root { --bg: #f4f5f3; --card: #fff; --ink: #1d2326; --muted: #5a6468; --rule: #d5d9d6; --park: #b3412f; --accent: #2b6c7f; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { --bg: #14181a; --card: #1d2326; --ink: #e3e7e6; --muted: #9aa5a8; --rule: #2e3639; --park: #f0a092; --accent: #7cc0d3; color-scheme: dark; } }
+body { margin: 0; padding: 20px max(16px, env(safe-area-inset-left)); background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, sans-serif; }
+h1 { font-size: 20px; margin: 0 0 4px; } .sub { color: var(--muted); margin: 0 0 16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 20px; }
+.tile { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 10px; }
+.tile b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; } .tile span { color: var(--muted); font-size: 12px; }
+.board { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; align-items: start; }
+.column h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+.card { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+.card.parked { border-color: var(--park); } .card header { display: flex; justify-content: space-between; gap: 8px; }
+.id { font-family: ui-monospace, monospace; font-size: 12px; } .stage { color: var(--muted); font-size: 12px; }
+.title { margin: 6px 0; font-weight: 600; } dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 0; font-size: 12px; }
+dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; } a { color: var(--accent); } .parked strong { color: var(--park); }
+pre { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 10px; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, monospace; }
+h2 { font-size: 15px; margin: 20px 0 8px; } table { border-collapse: collapse; width: 100%; font-size: 12px; }
+td { border-top: 1px solid var(--rule); padding: 4px 8px 4px 0; vertical-align: top; } td.at { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
+.summary > dl { font-size: 13px; } details { margin: 8px 0; } summary { cursor: pointer; color: var(--accent); }
+`;
 
 // A static page: no server, no script, refreshed by the browser while it stays open.
 export function boardHtml(root: string, now = new Date()) {
@@ -156,22 +191,7 @@ export function boardHtml(root: string, now = new Date()) {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="30"><title>Halvard factory board</title>
-<style>
-:root { --bg: #f4f5f3; --card: #fff; --ink: #1d2326; --muted: #5a6468; --rule: #d5d9d6; --park: #b3412f; --accent: #2b6c7f; color-scheme: light; }
-@media (prefers-color-scheme: dark) { :root { --bg: #14181a; --card: #1d2326; --ink: #e3e7e6; --muted: #9aa5a8; --rule: #2e3639; --park: #f0a092; --accent: #7cc0d3; color-scheme: dark; } }
-body { margin: 0; padding: 20px max(16px, env(safe-area-inset-left)); background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, sans-serif; }
-h1 { font-size: 20px; margin: 0 0 4px; } .sub { color: var(--muted); margin: 0 0 16px; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 20px; }
-.tile { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 10px; }
-.tile b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; } .tile span { color: var(--muted); font-size: 12px; }
-.board { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; align-items: start; }
-.column h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
-.card { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 10px; margin-bottom: 10px; }
-.card.parked { border-color: var(--park); } .card header { display: flex; justify-content: space-between; gap: 8px; }
-.id { font-family: ui-monospace, monospace; font-size: 12px; } .stage { color: var(--muted); font-size: 12px; }
-.title { margin: 6px 0; font-weight: 600; } dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 0; font-size: 12px; }
-dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; } a { color: var(--accent); } .parked strong { color: var(--park); }
-</style></head><body>
+<style>${STYLE}</style></head><body>
 <h1>Halvard factory</h1>
 <p class="sub">${escape(root)} · updated ${escape(now.toISOString().replace('T', ' ').slice(0, 16))} UTC</p>
 <section class="tiles">${tiles.map(([label, value]) => `<div class="tile"><b>${escape(value)}</b><span>${escape(label)}</span></div>`).join('')}</section>
@@ -182,7 +202,7 @@ ${COLUMNS.map(
   ) => `<div class="column"><h2>${escape(column.title)} (${jobs.filter((job) => column.stages.includes(job.stage)).length})</h2>
 ${jobs
   .filter((job) => column.stages.includes(job.stage))
-  .map(card)
+  .map((job) => card(root, job))
   .join('\n')}</div>`,
 ).join('\n')}
 </section>
@@ -190,9 +210,102 @@ ${jobs
 `;
 }
 
-export function writeBoard(root: string, out = join(repoHome(root), 'board.html')) {
+// The end of a log, read without loading a file that can grow to many megabytes.
+function tail(file: string, bytes = 32 * 1024) {
+  if (!existsSync(file)) return null;
+  const fd = openSync(file, 'r');
+  try {
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, bytes);
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, size - length);
+    const text = buffer.toString('utf8');
+    // Start at a whole line when the file was cut.
+    return size > bytes ? text.slice(text.indexOf('\n') + 1) : text;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+const read = (file: string) => (existsSync(file) ? readFileSync(file, 'utf8') : null);
+
+// One line per event; a gate's failing tail and a review's findings follow in full.
+function timelineRow(event: Event) {
+  const { at, event: name, ...rest } = event;
+  let text: string;
+  let more = '';
+  if (name === 'agent') {
+    text = `${rest.stage} run with ${rest.harness}: ${rest.seconds}s, $${Number(rest.costUsd ?? 0).toFixed(2)}${rest.error ? `, ${rest.error}` : ''}`;
+  } else if (name === 'gate') {
+    text = rest.passed ? 'gate passed' : 'gate failed';
+    if (typeof rest.tail === 'string') more = `<pre>${escape(rest.tail)}</pre>`;
+  } else if (name === 'review') {
+    text = `review round ${rest.round} by ${rest.reviewer}: ${rest.verdict}, ${rest.findings} finding(s)`;
+    const items = Array.isArray(rest.items) ? (rest.items as Record<string, unknown>[]) : [];
+    if (items.length) {
+      more = `<ul>${items.map((item) => `<li><strong>${escape(item.severity)}</strong> ${escape(item.location)}: ${escape(item.problem)}</li>`).join('')}</ul>`;
+    }
+  } else if (name === 'parked') {
+    text = `parked (${rest.reason})`;
+    more = `<pre>${escape(rest.detail)}</pre>`;
+  } else {
+    text = Object.keys(rest).length ? `${name}: ${JSON.stringify(rest)}` : name;
+  }
+  return `<tr><td class="at">${escape(at.replace('T', ' ').slice(0, 19))}</td><td>${escape(text)}${more}</td></tr>`;
+}
+
+const LOGS = ['agent.log', 'runner.log', 'setup.log', 'holdout.log'];
+
+// Everything the job folder records about one job, on one static page.
+export function jobHtml(root: string, job: FactoryJob, board: string, now = new Date()) {
+  const file = (name: string) => jobFile(root, job.id, name);
+  const text = (title: string, content: string | null) =>
+    content === null ? '' : `<h2>${escape(title)}</h2><pre>${escape(content)}</pre>`;
+  const logs = LOGS.flatMap((name) => {
+    const content = tail(file(name));
+    return content === null
+      ? []
+      : [
+          `<details><summary>${escape(name)}, last lines</summary><pre>${escape(content)}</pre></details>`,
+        ];
+  });
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30"><title>${escape(job.id)}: Halvard factory</title>
+<style>${STYLE}</style></head><body>
+<p class="sub"><a href="${escape(pathToFileURL(board).href)}">Board</a></p>
+<h1>${escape(job.title)}</h1>
+<p class="sub">${escape(job.id)} · ${escape(job.stage)} · updated ${escape(now.toISOString().replace('T', ' ').slice(0, 16))} UTC</p>
+<section class="summary"><dl>
+${job.issue ? `<dt>Issue</dt><dd>${link(job.issue.url, `#${job.issue.number}`)}</dd>` : ''}
+<dt>Author</dt><dd>${escape(job.author)}</dd>
+${job.reviewer ? `<dt>Review</dt><dd>${escape(job.reviewer)}, round ${job.round}</dd>` : ''}
+<dt>Cost</dt><dd>$${job.costUsd.toFixed(2)}, ${job.fixPasses} fix pass(es)</dd>
+${job.branch ? `<dt>Branch</dt><dd>${escape(job.branch)}</dd>` : ''}
+${job.worktree ? `<dt>Worktree</dt><dd>${escape(job.worktree)}</dd>` : ''}
+${job.pr ? `<dt>PR</dt><dd>${link(job.pr, job.pr)}</dd>` : ''}
+${job.parked ? `<dt>Parked</dt><dd><strong>${escape(job.parked.reason)}</strong></dd>` : ''}
+</dl></section>
+${job.parked ? `<pre>${escape(job.parked.detail)}</pre>` : ''}
+<h2>Timeline</h2>
+<table>${jobEvents(root, job.id).map(timelineRow).join('\n')}</table>
+${text('Brief', read(file('brief.md')))}
+${text('Plan', read(file('plan.md')))}
+${text('Evidence', read(file('evidence.md')))}
+${logs.length ? `<h2>Logs</h2>${logs.join('\n')}` : ''}
+</body></html>
+`;
+}
+
+const replace = (out: string, html: string) => {
   const temp = `${out}.tmp`;
-  writeFileSync(temp, boardHtml(root), { mode: 0o600 });
+  writeFileSync(temp, html, { mode: 0o600 });
   renameSync(temp, out);
+};
+
+// Writes every job's page, then the board that links to them.
+export function writeBoard(root: string, out = join(repoHome(root), 'board.html')) {
+  for (const job of listJobs(root)) replace(jobPage(root, job.id), jobHtml(root, job, out));
+  replace(out, boardHtml(root));
   return out;
 }

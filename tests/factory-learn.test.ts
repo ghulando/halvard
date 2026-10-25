@@ -559,6 +559,7 @@ test('a retro turns recurring findings into a job that changes only guidance', a
   );
   assert.match(brief, /- second, review round 1/);
   assert.ok(calls().some((call) => call.prompt.includes('Factory retro')));
+  assert.ok(existsSync(jobFile(root, id, 'job.html')));
 });
 
 test('a retro job that changes code parks, and serve starts a retro when one is due', async (t) => {

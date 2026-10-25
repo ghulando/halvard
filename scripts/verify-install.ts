@@ -106,6 +106,7 @@ try {
     'README.md',
     'CONTRIBUTING.md',
     'CHANGELOG.md',
+    'docs/architecture.md',
     'docs/flow.md',
     'docs/configuration.md',
     'docs/factory.md',

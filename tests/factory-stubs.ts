@@ -215,7 +215,10 @@ const path = require('path');
 const name = path.basename(process.argv[1]);
 const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log(name + ' 1.0.0'); process.exit(0); }
-const prompt = name === 'grok' ? fs.readFileSync(args[args.indexOf('--prompt-file') + 1], 'utf8') : args[args.length - 1];
+// Like the real CLIs: Grok reads a prompt file, Claude reads stdin and fails without input.
+const prompt = name === 'grok' ? fs.readFileSync(args[args.indexOf('--prompt-file') + 1], 'utf8')
+  : name === 'claude' ? fs.readFileSync(0, 'utf8') : args[args.length - 1];
+if (!prompt) { process.stderr.write('Error: Input must be provided either through stdin or as a prompt argument when using --print\\n'); process.exit(1); }
 const reviewer = args.includes('--tools') || prompt.includes('independent read-only reviewer') || prompt.startsWith('Review the evidence');
 const reply = (text, cost) => process.stdout.write(JSON.stringify(name === 'grok' ? { text } : { result: text, total_cost_usd: cost, is_error: false }));
 if (process.env.STUB_SLEEP) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.STUB_SLEEP));

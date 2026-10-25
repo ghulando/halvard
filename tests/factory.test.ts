@@ -227,7 +227,8 @@ test('headless command lines follow the harness, stage and auth mode', () => {
   assert.ok(api.includes('--bare') && api.includes('--plugin-dir'));
   assert.equal(api[api.indexOf('--max-budget-usd') + 1], '3.00');
   assert.equal(api[api.indexOf('--permission-prompts') + 1], 'none');
-  assert.equal(api.at(-1), 'PROMPT');
+  // The prompt goes on stdin; after --add-dir it would be read as a directory.
+  assert.equal(api.includes('PROMPT'), false);
   const subscription = agentCommand('claude', 'plan', { ...base, config: config() });
   assert.equal(subscription.includes('--bare'), false);
   assert.equal(subscription[subscription.indexOf('--permission-mode') + 1], 'dontAsk');

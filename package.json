@@ -32,6 +32,7 @@
     "LICENSE",
     "third-party",
     "UPSTREAM.md",
+    "docs/architecture.md",
     "docs/flow.md",
     "docs/install.md",
     "docs/usage.md",

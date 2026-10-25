@@ -16,6 +16,8 @@ Factory mode, phase 4. `holdout` checks keep their scenarios outside the reposit
 
 Factory mode, phase 2. `factory serve` polls GitHub and works issues from labels set by people with write access: `factory`, `factory:small`, `factory:approved`, `factory:stop`, `factory:retry` and `priority:high`. It stops claiming work at 90% of a monthly budget (`monthlyUsd`). `factory board` writes a static HTML board and `factory metrics` prints gate, review, park and cost numbers. `factory stop`, `rework --note` and `replan` handle running and parked jobs. With `tests`, a second harness writes acceptance tests that the builder may not change. Worktrees carry the repository's name, so jobs with the same id in two repositories no longer share a task workspace.
 
+Added [architecture](docs/architecture.md): C4 system context, container, component, dynamic and deployment diagrams of Halvard, with a table that maps each element to its files.
+
 ## 0.0.1
 
 First release: shared workflow engine, native adapters for Pi, Claude Code and Codex, portable task records, configurable gate and independent review.

@@ -6,15 +6,15 @@ Every box names its type and technology, and every arrow says what it does and h
 
 ## Key
 
-| Shape | Meaning |
-| --- | --- |
-| Dark blue box | Person |
-| Blue box | Halvard, or one of its containers |
-| Light blue box | A component inside a Halvard container |
-| Grey box | A system, store or process outside Halvard |
-| Cylinder | A data store: files on disk |
-| Dashed frame | The boundary of a system or container |
-| Solid arrow | A one-way call, read or write, labelled with its purpose and technology |
+| Shape          | Meaning                                                                 |
+| -------------- | ----------------------------------------------------------------------- |
+| Dark blue box  | Person                                                                  |
+| Blue box       | Halvard, or one of its containers                                       |
+| Light blue box | A component inside a Halvard container                                  |
+| Grey box       | A system, store or process outside Halvard                              |
+| Cylinder       | A data store: files on disk                                             |
+| Dashed frame   | The boundary of a system or container                                   |
+| Solid arrow    | A one-way call, read or write, labelled with its purpose and technology |
 
 ## 1. System context
 
@@ -372,37 +372,37 @@ _Key: dashed frames are deployment nodes; boxes inside them are the containers d
 
 ## Where things live
 
-| Element | Files |
-| --- | --- |
-| Hook guard | `bin/hook.ts`, `hooks/hooks.json` (Claude Code), `hooks/codex.json`, `hooks/grok.json`, `hooks/cursor.json` |
-| Pi extension | `adapters/pi.ts`, `adapters/plan-ui.ts`, `adapters/plan-utils.ts` |
-| halvard CLI | `bin/halvard.ts`, `core/cli.ts` |
-| Factory runner | `core/factory*.ts`, started by `bin/halvard.ts factory` |
-| Skills | `skills/*/SKILL.md`; the harness manifests in `.claude-plugin/`, `.codex-plugin/`, `.grok-plugin/` |
-| Workflow state | `core/state.ts` (`$TMPDIR/halvard-<uid>/<repo digest>`) |
-| Task workspace | `core/tasks.ts`, `core/flow-config.ts` (`HALVARD_WORKSPACE`, default `~/.halvard`) |
-| Factory store | `core/factory-store.ts` (`HALVARD_FACTORY_HOME`, default `~/.halvard-factory`) |
-| Harness adapter | `adapters/payload.ts`, `adapters/hooks.ts`, `adapters/messages.ts` |
-| Runtime | `core/runtime.ts`, `core/context.ts`, `core/status.ts` |
-| Shell classifier | `core/shell.ts` |
-| Tool normalizer | `core/tools.ts` |
-| Policy | `core/policy.ts` |
-| State and fingerprint | `core/state.ts` |
-| Configuration | `core/project.ts`, `core/flow-config.ts`, `core/types.ts` |
-| Tasks | `core/tasks.ts`; `task-done` runs `completeTask` in `core/runtime.ts` |
-| Gate | `runGate` in `core/runtime.ts` |
-| Review runner | `core/review.ts` |
-| Job pipeline | `core/factory.ts` |
-| Serve loop | `core/factory-serve.ts` |
-| Harness driver | `core/factory-harness.ts` |
-| Container box | `core/factory-container.ts` |
-| Job store | `core/factory-store.ts` |
-| Ship and evidence | `core/factory-ship.ts` for the Git and `gh` helpers, changed files, risk and the pull request body; `ship()` in `core/factory.ts` uses them to commit, push and open the pull request |
-| Outcomes and auto-merge | `core/factory-outcomes.ts` |
-| Retro | `core/factory-retro.ts` |
-| Board and metrics | `core/factory-board.ts` |
+| Element                 | Files                                                                                                                                                                                                                       |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hook guard              | `bin/hook.ts`, `hooks/hooks.json` (Claude Code), `hooks/codex.json`, `hooks/grok.json`, `hooks/cursor.json`                                                                                                                 |
+| Pi extension            | `adapters/pi.ts`, `adapters/plan-ui.ts`, `adapters/plan-utils.ts`                                                                                                                                                           |
+| halvard CLI             | `bin/halvard.ts`, `core/cli.ts`                                                                                                                                                                                             |
+| Factory runner          | `core/factory/`, started by `bin/halvard.ts factory`                                                                                                                                                                        |
+| Skills                  | `skills/*/SKILL.md`; the harness manifests in `.claude-plugin/`, `.codex-plugin/`, `.grok-plugin/`                                                                                                                          |
+| Workflow state          | `core/state.ts` (`$TMPDIR/halvard-<uid>/<repo digest>`)                                                                                                                                                                     |
+| Task workspace          | `core/workflow/tasks.ts`, `core/flow-config.ts` (`HALVARD_WORKSPACE`, default `~/.halvard`)                                                                                                                                 |
+| Factory store           | `core/factory/store.ts` (`HALVARD_FACTORY_HOME`, default `~/.halvard-factory`)                                                                                                                                              |
+| Harness adapter         | `adapters/payload.ts`, `adapters/hooks.ts`, `adapters/messages.ts`                                                                                                                                                          |
+| Runtime                 | `core/runtime.ts`, `core/context.ts`, `core/workflow/status.ts`                                                                                                                                                             |
+| Shell classifier        | `core/guard/shell.ts`                                                                                                                                                                                                       |
+| Tool normalizer         | `core/guard/tools.ts`                                                                                                                                                                                                       |
+| Policy                  | `core/guard/policy.ts`                                                                                                                                                                                                      |
+| State and fingerprint   | `core/state.ts`                                                                                                                                                                                                             |
+| Configuration           | `core/project.ts`, `core/flow-config.ts`, `core/types.ts`                                                                                                                                                                   |
+| Tasks                   | `core/workflow/tasks.ts`; `task-done` runs `completeTask` in `core/runtime.ts`                                                                                                                                              |
+| Gate                    | `runGate` in `core/runtime.ts`                                                                                                                                                                                              |
+| Review runner           | `core/workflow/review.ts`                                                                                                                                                                                                   |
+| Job pipeline            | `core/factory/pipeline.ts`, with `core/factory/isolation.ts` for the scrubbed environment, mounts and Git checks, `core/factory/github.ts` for issues and label events, and `core/factory/prompts.ts` for the agent prompts |
+| Serve loop              | `core/factory/serve.ts`                                                                                                                                                                                                     |
+| Harness driver          | `core/factory/harness.ts`                                                                                                                                                                                                   |
+| Container box           | `core/factory/container.ts`                                                                                                                                                                                                 |
+| Job store               | `core/factory/store.ts`                                                                                                                                                                                                     |
+| Ship and evidence       | `core/factory/ship.ts` for the Git and `gh` helpers, changed files, risk and the pull request body; `ship()` in `core/factory/pipeline.ts` uses them to commit, push and open the pull request                              |
+| Outcomes and auto-merge | `core/factory/outcomes.ts`                                                                                                                                                                                                  |
+| Retro                   | `core/factory/retro.ts`                                                                                                                                                                                                     |
+| Board and metrics       | `core/factory/board.ts`                                                                                                                                                                                                     |
 
-Not drawn, because they run only when you install or maintain Halvard: installation (`scripts/install.sh`, `core/install*.ts`, `core/personal-install.ts`), setup and bootstrap (`core/setup.ts`, `core/bootstrap.ts`, with the stack records in `stacks/`), history cleanup and retro events (`core/clean-history.ts`, `core/retro.ts`, which read harness transcripts), the Herdr team settings (`core/team.ts`) and `doctor` (`core/doctor.ts`, `core/package.ts`).
+Not drawn, because they run only when you install or maintain Halvard: installation (`scripts/install.sh`, `core/install/`), setup and bootstrap (`core/setup/setup.ts`, `core/setup/bootstrap.ts`, with the stack records in `stacks/`), history cleanup and retro events (`core/workflow/clean-history.ts`, `core/workflow/retro.ts`, which read harness transcripts), the Herdr team settings (`core/workflow/team.ts`) and `doctor` (`core/setup/doctor.ts`, `core/install/package.ts`).
 
 ## Keeping it current
 

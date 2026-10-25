@@ -5,7 +5,7 @@ import type {
   HistoryNotice,
   HistoryPlan,
   HistoryProcess,
-} from './types.ts';
+} from '../types.ts';
 import { randomUUID, createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
@@ -20,8 +20,8 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
-import { personalRoot, workspaceRoot } from './flow-config.ts';
-import { privateDirectory } from './state.ts';
+import { personalRoot, workspaceRoot } from '../flow-config.ts';
+import { privateDirectory } from '../state.ts';
 
 const harnessNames: HistoryHarness[] = ['claude', 'pi', 'codex'];
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;

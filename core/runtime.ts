@@ -38,8 +38,8 @@ import {
   projectPath,
 } from './project.ts';
 import { startupContext } from './context.ts';
-import { commands, isShipping, rootGit, shellKind } from './shell.ts';
-import { normalize } from './tools.ts';
+import { commands, isShipping, rootGit, shellKind } from './guard/shell.ts';
+import { normalize } from './guard/tools.ts';
 import {
   HOOK_BUDGET,
   digest,
@@ -49,13 +49,13 @@ import {
   sessionKey,
   withState,
 } from './state.ts';
-import { hasReview } from './review.ts';
-import { evaluatePolicy } from './policy.ts';
+import { hasReview } from './workflow/review.ts';
+import { evaluatePolicy } from './guard/policy.ts';
 import { parseCommand } from './cli.ts';
-import { planIntact, readTask, taskWorkspace } from './tasks.ts';
+import { planIntact, readTask, taskWorkspace } from './workflow/tasks.ts';
 import { assignment, providers, workspaceRoot } from './flow-config.ts';
-import { packageDigest } from './package.ts';
-import { claimsDone, completionStatus } from './status.ts';
+import { packageDigest } from './install/package.ts';
+import { claimsDone, completionStatus } from './workflow/status.ts';
 
 export const pluginRoot = fileURLToPath(new URL('../', import.meta.url));
 // The guard re-parses printed commands and rejects a backslash outside quotes,

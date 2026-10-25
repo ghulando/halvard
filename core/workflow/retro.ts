@@ -1,10 +1,10 @@
-import type { HistoryHarness, RetroCount, RetroEvents, RetroHarnessEvents } from './types.ts';
+import type { HistoryHarness, RetroCount, RetroEvents, RetroHarnessEvents } from '../types.ts';
 import { createReadStream, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { transcriptFiles } from './clean-history.ts';
-import { workspaceRoot } from './flow-config.ts';
-import { inside, loadProject } from './project.ts';
+import { workspaceRoot } from '../flow-config.ts';
+import { inside, loadProject } from '../project.ts';
 
 const harnesses: HistoryHarness[] = ['claude', 'codex', 'pi'];
 // The workspace marker is written at task-start and the last report near done.

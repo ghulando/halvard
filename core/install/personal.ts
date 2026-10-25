@@ -1,12 +1,12 @@
-import type { HarnessSettings, PackageMetadata, SettingsWrite, InstallOptions } from './types.ts';
+import type { HarnessSettings, PackageMetadata, SettingsWrite, InstallOptions } from '../types.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { flowConfig, personalRoot, personalSettings, workspaceRoot } from './flow-config.ts';
-import { projectPath } from './project.ts';
-import { applyInstallation } from './install-transaction.ts';
+import { flowConfig, personalRoot, personalSettings, workspaceRoot } from '../flow-config.ts';
+import { projectPath } from '../project.ts';
+import { applyInstallation } from './transaction.ts';
 import { packageStatus } from './package.ts';
-import { pluginRoot } from './runtime.ts';
+import { pluginRoot } from '../runtime.ts';
 
 export function personalInstallPlan(
   home = homedir(),

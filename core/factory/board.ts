@@ -1,8 +1,8 @@
-import type { FactoryJob } from './types.ts';
+import type { FactoryJob } from '../types.ts';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { jobFile, listJobs, repoHome } from './factory-store.ts';
-import { classRates, trackedJobs } from './factory-outcomes.ts';
+import { jobFile, listJobs, repoHome } from './store.ts';
+import { classRates, trackedJobs } from './outcomes.ts';
 
 interface Event {
   at: string;

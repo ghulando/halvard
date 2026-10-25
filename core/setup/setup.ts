@@ -1,9 +1,9 @@
-import type { SetupProject, ProjectConfig } from './types.ts';
+import type { SetupProject, ProjectConfig } from '../types.ts';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
-import { CONFIG, currentBranch, git, loadProject, projectPath } from './project.ts';
-import { fingerprint } from './state.ts';
-import { flowConfig } from './flow-config.ts';
+import { CONFIG, currentBranch, git, loadProject, projectPath } from '../project.ts';
+import { fingerprint } from '../state.ts';
+import { flowConfig } from '../flow-config.ts';
 
 const ignored = new Set([
   '.git',

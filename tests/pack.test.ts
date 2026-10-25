@@ -27,9 +27,15 @@ import {
   personalSettings,
   reviewerChoices,
 } from '../core/flow-config.ts';
-import { startTask, resumeTask, handoffTask, readTask, taskWorkspace } from '../core/tasks.ts';
-import { proposeSetup, applySetup } from '../core/setup.ts';
-import { installPersonal, personalInstallPlan } from '../core/personal-install.ts';
+import {
+  startTask,
+  resumeTask,
+  handoffTask,
+  readTask,
+  taskWorkspace,
+} from '../core/workflow/tasks.ts';
+import { proposeSetup, applySetup } from '../core/setup/setup.ts';
+import { installPersonal, personalInstallPlan } from '../core/install/personal.ts';
 import {
   parseVerdict,
   runReview as rawReview,
@@ -37,7 +43,7 @@ import {
   hasReview,
   reviewCommand,
   reviewKey,
-} from '../core/review.ts';
+} from '../core/workflow/review.ts';
 import { fingerprint, sessionKey, withState } from '../core/state.ts';
 import { handle, runGate } from '../core/runtime.ts';
 
@@ -415,7 +421,7 @@ test('personal upgrades stage a replacement and preserve preferences; same versi
       '0.0.1',
     );
   }
-  assert.equal(existsSync(join(target, 'core/shell.ts')), true);
+  assert.equal(existsSync(join(target, 'core/guard/shell.ts')), true);
   assert.equal(existsSync(join(target, 'obsolete.txt')), false);
   assert.equal(readFileSync(join(destination, 'personal.json'), 'utf8'), personal);
   assert.equal(personalInstallPlan(home, destination).copy, null);
@@ -1318,7 +1324,7 @@ test('additional rounds require an exact-task exception and retain preceding rep
   const extra = await runReview(root, task.task, { ...args, round: 3 });
   assert.equal(extra.authorization, 'Explicit test user authorization');
   const { withState } = await import('../core/state.ts');
-  const { reviewKey } = await import('../core/review.ts');
+  const { reviewKey } = await import('../core/workflow/review.ts');
   const state = await withState(root, reviewKey(readTask(loadProject(root), task.task)), (s) => s);
   assert.equal(state.first!.round, 1);
   assert.equal(state.second!.round, 2);

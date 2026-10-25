@@ -8,8 +8,8 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { install, installPlan } from '../core/install.ts';
-import { installPersonal, personalInstallPlan } from '../core/personal-install.ts';
+import { install, installPlan } from '../core/install/install.ts';
+import { installPersonal, personalInstallPlan } from '../core/install/personal.ts';
 
 function home(t: TestContext) {
   const dir = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'workflow-install-transaction-')));

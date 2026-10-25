@@ -1,9 +1,9 @@
-import type { ContainerConfig } from './types.ts';
+import type { ContainerConfig } from '../types.ts';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { pluginRoot } from './runtime.ts';
+import { pluginRoot } from '../runtime.ts';
 
 export interface Box {
   // Host paths mounted at the same path, so Git and Halvard see one tree in both. A

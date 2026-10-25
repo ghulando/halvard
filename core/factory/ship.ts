@@ -1,6 +1,6 @@
-import type { FactoryJob, Receipt, ReviewRecord } from './types.ts';
+import type { FactoryJob, Receipt, ReviewRecord } from '../types.ts';
 import { spawnSync } from 'node:child_process';
-import { matches } from './project.ts';
+import { matches } from '../project.ts';
 
 export interface Run {
   status: number | null;

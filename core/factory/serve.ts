@@ -1,34 +1,25 @@
-import type { FactoryJob } from './types.ts';
+import type { FactoryJob } from '../types.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { gh } from './factory-ship.ts';
-import {
-  jobFile,
-  listJobs,
-  loadJob,
-  lockHolder,
-  lockJob,
-  lockServe,
-  repoHome,
-} from './factory-store.ts';
-import { monthSpend, writeBoard } from './factory-board.ts';
-import { autoMerge, refreshOutcomes } from './factory-outcomes.ts';
-import { retroDue, retroSource } from './factory-retro.ts';
+import { gh } from './ship.ts';
+import { jobFile, listJobs, loadJob, lockHolder, lockJob, lockServe, repoHome } from './store.ts';
+import { monthSpend, writeBoard } from './board.ts';
+import { autoMerge, refreshOutcomes } from './outcomes.ts';
+import { retroDue, retroSource } from './retro.ts';
+import { issueSource, labeledBy } from './github.ts';
 import {
   type Context,
   ACTIVE,
   approval,
   blocker,
   build,
-  issueSource,
-  labeledBy,
   newJob,
   park,
   plan,
   replan,
   say,
   stopRequested,
-} from './factory.ts';
+} from './pipeline.ts';
 
 const WAITING = ['planning', 'awaiting-approval', 'approved'];
 
@@ -103,80 +94,94 @@ export async function cycle(ctx: Context) {
   }
 }
 
-async function decide(ctx: Context, jobs: ReturnType<typeof pool>) {
+type Pool = ReturnType<typeof pool>;
+
+// One pass: act on the labels of known jobs, follow up on opened pull requests, start a due
+// retro, then claim new issues.
+async function decide(ctx: Context, jobs: Pool) {
   // A tampered run or an unreadable job file needs a human before anything starts.
   const blocked = blocker(ctx.root);
   if (blocked) {
     say(`${blocked}; starting nothing until you check it`);
     return;
   }
-
-  for (const listed of listJobs(ctx.root)) {
-    if (!listed.issue) continue;
-    const { id } = listed;
-    const issue = listed.issue.number;
-    // A stop label parks a job that is waiting; a running job stops itself at its next step.
-    if (WAITING.includes(listed.stage) && labeledBy(ctx, issue, 'factory:stop', null)) {
-      const go = await step(ctx, id, () =>
-        underLock(ctx, id, (job) =>
-          WAITING.includes(job.stage)
-            ? park(ctx, job, 'stopped-by-human', 'the issue is labeled factory:stop')
-            : null,
-        ),
-      );
-      if (!go) return;
-      continue;
-    }
-    // A retry label restarts a parked job, or one whose runner died mid-run.
-    const since =
-      listed.stage === 'parked'
-        ? (listed.parked?.at ?? null)
-        : [...ACTIVE, 'planning'].includes(listed.stage) && !runnerAlive(ctx, id)
-          ? listed.updated
-          : null;
-    if (since && labeledBy(ctx, issue, 'factory:retry', since)) {
-      await jobs.free();
-      if (!underBudget(ctx)) continue;
-      gh(ctx.root, [
-        'issue',
-        'edit',
-        String(issue),
-        '--remove-label',
-        'factory:retry',
-        '--remove-label',
-        'factory:parked',
-      ]);
-      if (stopRequested()) return;
-      await jobs.start(() =>
-        step(ctx, id, () =>
-          listed.small || listed.plan?.approvedBy
-            ? build(ctx, id, true, { retry: true })
-            : replan(ctx, id),
-        ),
-      );
-      continue;
-    }
-    // An approved job builds, whether its label came now or it was approved and never built.
-    if (['awaiting-approval', 'approved'].includes(listed.stage) && !runnerAlive(ctx, id)) {
-      await jobs.free();
-      if (!underBudget(ctx)) continue;
-      let ready = false;
-      const go = await step(ctx, id, () => {
-        ready =
-          underLock(
-            ctx,
-            id,
-            (job) =>
-              job.stage === 'approved' || (job.stage === 'awaiting-approval' && approval(ctx, job)),
-          ) ?? false;
-      });
-      if (!go) return;
-      if (ready) await jobs.start(() => step(ctx, id, () => build(ctx, id, true)));
-    }
+  for (const job of listJobs(ctx.root)) {
+    if (job.issue && !(await followLabels(ctx, jobs, job, job.issue.number))) return;
   }
+  followPullRequests(ctx);
+  if (stopRequested()) return;
+  if (!(await startRetro(ctx, jobs))) return;
+  await claimIssues(ctx, jobs);
+}
 
-  // Outcomes of opened pull requests feed the metrics and auto-merge; a GitHub failure here
-  // never stops the daemon from working issues.
+// When a factory:retry label counts from: the moment the job parked, or the last write of a
+// runner that died mid-run. Null when the job is not waiting for a retry.
+function retrySince(ctx: Context, job: FactoryJob) {
+  if (job.stage === 'parked') return job.parked?.at ?? null;
+  if ([...ACTIVE, 'planning'].includes(job.stage) && !runnerAlive(ctx, job.id)) return job.updated;
+  return null;
+}
+
+// A stop label parks a waiting job, a retry label restarts a parked or dead one, and an
+// approval builds. A running job checks for the stop label itself at its next step. False
+// when the pass must end.
+async function followLabels(ctx: Context, jobs: Pool, listed: FactoryJob, issue: number) {
+  const { id } = listed;
+  if (WAITING.includes(listed.stage) && labeledBy(ctx, issue, 'factory:stop', null)) {
+    return step(ctx, id, () =>
+      underLock(ctx, id, (job) =>
+        WAITING.includes(job.stage)
+          ? park(ctx, job, 'stopped-by-human', 'the issue is labeled factory:stop')
+          : null,
+      ),
+    );
+  }
+  const since = retrySince(ctx, listed);
+  if (since && labeledBy(ctx, issue, 'factory:retry', since)) {
+    await jobs.free();
+    if (!underBudget(ctx)) return true;
+    gh(ctx.root, [
+      'issue',
+      'edit',
+      String(issue),
+      '--remove-label',
+      'factory:retry',
+      '--remove-label',
+      'factory:parked',
+    ]);
+    if (stopRequested()) return false;
+    await jobs.start(() =>
+      step(ctx, id, () =>
+        listed.small || listed.plan?.approvedBy
+          ? build(ctx, id, true, { retry: true })
+          : replan(ctx, id),
+      ),
+    );
+    return true;
+  }
+  // An approved job builds, whether its label came now or it was approved and never built.
+  if (['awaiting-approval', 'approved'].includes(listed.stage) && !runnerAlive(ctx, id)) {
+    await jobs.free();
+    if (!underBudget(ctx)) return true;
+    let ready = false;
+    const go = await step(ctx, id, () => {
+      ready =
+        underLock(
+          ctx,
+          id,
+          (job) =>
+            job.stage === 'approved' || (job.stage === 'awaiting-approval' && approval(ctx, job)),
+        ) ?? false;
+    });
+    if (!go) return false;
+    if (ready) await jobs.start(() => step(ctx, id, () => build(ctx, id, true)));
+  }
+  return true;
+}
+
+// Outcomes of opened pull requests feed the metrics and auto-merge; a GitHub failure here
+// never stops the daemon from working issues.
+function followPullRequests(ctx: Context) {
   const { baseBranch } = ctx.project.config.workflow;
   try {
     for (const id of autoMerge(ctx.root, baseBranch, ctx.factory.autoMerge)) {
@@ -188,29 +193,31 @@ async function decide(ctx: Context, jobs: ReturnType<typeof pool>) {
   } catch (err) {
     say(`outcomes: ${(err as Error).message}`);
   }
-  if (stopRequested()) return;
+}
 
-  // A retro is due once a period has passed and findings recur in at least two jobs.
+// A retro is due once a period has passed and findings recur in at least two jobs. False
+// when the pass must end.
+async function startRetro(ctx: Context, jobs: Pool) {
   const now = new Date();
-  if (retroDue(ctx, now)) {
-    const { source: retro } = retroSource(ctx, now);
-    if (retro) {
-      await jobs.free();
-      if (!underBudget(ctx)) return;
-      if (stopRequested()) return;
-      let job: FactoryJob | null = null;
-      try {
-        job = newJob(ctx, retro, true, false);
-      } catch (err) {
-        say(`retro: ${(err as Error).message}`);
-      }
-      if (job) {
-        const id = job.id;
-        await jobs.start(() => step(ctx, id, () => build(ctx, id, true)));
-      }
-    }
+  if (!retroDue(ctx, now)) return true;
+  const { source: retro } = retroSource(ctx, now);
+  if (!retro) return true;
+  await jobs.free();
+  if (!underBudget(ctx) || stopRequested()) return false;
+  let job: FactoryJob;
+  try {
+    job = newJob(ctx, retro, true, false);
+  } catch (err) {
+    say(`retro: ${(err as Error).message}`);
+    return true;
   }
+  const id = job.id;
+  await jobs.start(() => step(ctx, id, () => build(ctx, id, true)));
+  return true;
+}
 
+// Open issues labeled factory that no job holds yet, priority:high first, then oldest first.
+function newIssues(ctx: Context) {
   // Oldest first, so priority and issue order hold across more open issues than one page.
   const list = gh(ctx.root, [
     'issue',
@@ -228,19 +235,22 @@ async function decide(ctx: Context, jobs: ReturnType<typeof pool>) {
   ]);
   if (list.status !== 0) {
     say(`gh issue list failed: ${list.stderr.trim()}`);
-    return;
+    return [];
   }
   const claimed = new Set(
     listJobs(ctx.root).flatMap((job) => (job.issue ? [job.issue.number] : [])),
   );
-  const issues = (JSON.parse(list.stdout) as { number: number; labels: { name: string }[] }[])
+  return (JSON.parse(list.stdout) as { number: number; labels: { name: string }[] }[])
     .filter((issue) => !labels(issue).includes('factory:stop') && !claimed.has(issue.number))
     .sort(
       (a, b) =>
         Number(labels(b).includes('priority:high')) - Number(labels(a).includes('priority:high')) ||
         a.number - b.number,
     );
-  for (const issue of issues) {
+}
+
+async function claimIssues(ctx: Context, jobs: Pool) {
+  for (const issue of newIssues(ctx)) {
     // Only someone with write access puts an issue into the factory or skips its plan.
     if (!labeledBy(ctx, issue.number, 'factory', null)) continue;
     if (existsSync(join(repoHome(ctx.root), 'jobs', `issue-${issue.number}`))) {

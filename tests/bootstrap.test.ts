@@ -22,11 +22,11 @@ import {
   bootstrapReport,
   parseRecord,
   stacksDirectory,
-} from '../core/bootstrap.ts';
+} from '../core/setup/bootstrap.ts';
 import { flowConfig } from '../core/flow-config.ts';
 import { git, loadProject } from '../core/project.ts';
-import { proposeSetup } from '../core/setup.ts';
-import { doctor } from '../core/doctor.ts';
+import { proposeSetup } from '../core/setup/setup.ts';
+import { doctor } from '../core/setup/doctor.ts';
 import { handle, pluginRoot, quote } from '../core/runtime.ts';
 
 const commit = (root: string) =>
@@ -498,8 +498,8 @@ test('bootstrap reads on protected branches and bootstrap-apply does not', async
 });
 
 test('the bootstrap engine and skill name no framework or library', () => {
-  const sources = ['../core/bootstrap.ts', '../skills/halvard-bootstrap/SKILL.md'].map((path) =>
-    readFileSync(new URL(path, import.meta.url), 'utf8').toLowerCase(),
+  const sources = ['../core/setup/bootstrap.ts', '../skills/halvard-bootstrap/SKILL.md'].map(
+    (path) => readFileSync(new URL(path, import.meta.url), 'utf8').toLowerCase(),
   );
   const names = [
     'dotnet',

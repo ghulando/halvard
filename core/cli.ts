@@ -16,7 +16,7 @@ const commandSpecs: Record<string, { count: number; options?: string[]; required
     options: ['author', 'fix', 'small', 'brief', 'base', 'plan', 'approved-by'],
     required: ['author'],
   },
-  'task-done': { count: 1, options: ['gate-session'], required: ['gate-session'] },
+  'task-done': { count: 1, options: ['gate-session', 'plan'], required: ['gate-session'] },
   'task-resume': { count: 1 },
   'task-handoff': { count: 1, options: ['author'], required: ['author'] },
   review: {

@@ -11,24 +11,23 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { MODEL_KEY_NAMES } from './flow-config.ts';
 import { pluginRoot } from './runtime.ts';
 import { hostResult } from './review.ts';
 
 export type Stage = 'plan' | 'build';
 
+// Everything a runner started that must not outlive it: agent and child process groups and
+// their containers. An exit, including the second Ctrl-C, ends them all.
+const live = new Set<() => void>();
+process.on('exit', () => {
+  for (const end of live) end();
+});
+
 // Model credentials the harnesses need. Every other variable that looks like a credential
 // is removed, so an agent does not use one by accident; this is not a boundary against
 // an agent that reads the user's files, which needs the containers of a later phase.
-const MODEL_KEYS = new Set([
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'XAI_API_KEY',
-  'GROK_CODE_XAI_API_KEY',
-  'CURSOR_API_KEY',
-  'OPENAI_API_KEY',
-  'CODEX_API_KEY',
-]);
+const MODEL_KEYS = new Set(MODEL_KEY_NAMES);
 const CREDENTIAL =
   /TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|_API_KEY$|_ACCESS_KEY|^AWS_|^AZURE_|^NPM_CONFIG__?AUTH|^NODE_AUTH/i;
 
@@ -218,6 +217,7 @@ export function runAgent(
     log,
     timeoutSeconds,
     shouldStop = () => false,
+    wrap,
   }: {
     cwd: string;
     prompt: string;
@@ -229,6 +229,9 @@ export function runAgent(
     timeoutSeconds: number;
     // Polled every few seconds; true stops the agent as an interruption.
     shouldStop?: () => boolean;
+    // Runs the command somewhere else, such as a container, given the prompt folder that
+    // must be reachable there; cleanup ends whatever the wrapper started.
+    wrap?: ((argv: string[], scratch: string) => Wrapped) | undefined;
   },
 ): Promise<AgentResult> {
   const scratch = mkdtempSync(join(tmpdir(), 'halvard-factory-'));
@@ -244,8 +247,9 @@ export function runAgent(
     budgetUsd,
     config,
   });
+  const { argv, cleanup } = wrap ? wrap(command, scratch) : { argv: command, cleanup: () => {} };
   const fd = openSync(log, 'a', 0o600);
-  writeSync(fd, `$ ${command.map((part) => (part === prompt ? '<prompt>' : part)).join(' ')}\n`);
+  writeSync(fd, `$ ${argv.map((part) => (part === prompt ? '<prompt>' : part)).join(' ')}\n`);
   return new Promise<AgentResult>((resolvePromise) => {
     let stdout = '';
     let timedOut = false;
@@ -259,14 +263,16 @@ export function runAgent(
       clearInterval(poll);
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);
+      live.delete(end);
       // Nothing the agent started may keep running after its turn, let alone change the
       // tree after the review.
       signal('SIGKILL');
+      cleanup();
       closeSync(fd);
       rmSync(scratch, { recursive: true, force: true });
       resolvePromise(result);
     };
-    const child = spawn(command[0]!, command.slice(1), {
+    const child = spawn(argv[0]!, argv.slice(1), {
       cwd,
       env,
       detached: true,
@@ -284,6 +290,11 @@ export function runAgent(
       interrupted = true;
       signal('SIGKILL');
     };
+    const end = () => {
+      signal('SIGKILL');
+      cleanup();
+    };
+    live.add(end);
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
     const poll = setInterval(() => {
@@ -327,6 +338,84 @@ export function runAgent(
             : (parsed.error ?? (code === 0 ? null : `${harness} exited ${code}`)),
       });
     });
+  });
+}
+
+export interface Wrapped {
+  argv: string[];
+  cleanup: () => void;
+}
+
+export interface ChildResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+// Runs a setup step, the gate, a review or task-done without blocking the runner, so jobs
+// that run side by side keep reading their agents' output. The process group, and whatever
+// cleanup names, ends at the deadline.
+export function runChild(
+  argv: string[],
+  {
+    cwd,
+    env,
+    timeoutMs,
+    log,
+    cleanup = () => {},
+    shouldStop = () => false,
+  }: {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    timeoutMs: number;
+    log: string;
+    cleanup?: () => void;
+    // Polled every few seconds; true ends the child as if it had failed.
+    shouldStop?: () => boolean;
+  },
+): Promise<ChildResult> {
+  return new Promise((resolvePromise) => {
+    let stdout = '';
+    let stderr = '';
+    const child = spawn(argv[0]!, argv.slice(1), {
+      cwd,
+      env,
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const end = () => {
+      try {
+        process.kill(-child.pid!, 'SIGKILL');
+      } catch {}
+      cleanup();
+    };
+    const timer = setTimeout(end, timeoutMs);
+    const poll = setInterval(() => {
+      if (shouldStop()) end();
+    }, 5000);
+    live.add(end);
+    child.stdout.on('data', (data: Buffer) => {
+      if (stdout.length < 32 * 1024 * 1024) stdout += data;
+    });
+    child.stderr.on('data', (data: Buffer) => {
+      if (stderr.length < 32 * 1024 * 1024) stderr += data;
+    });
+    let finished = false;
+    const done = (status: number | null, error?: string) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      live.delete(end);
+      end();
+      writeFileSync(log, `$ ${argv.join(' ')}\n${stdout}${stderr}${error ? error + '\n' : ''}\n`, {
+        flag: 'a',
+        mode: 0o600,
+      });
+      resolvePromise({ status, stdout, stderr: error ? `${stderr}${error}` : stderr });
+    };
+    child.on('error', (error) => done(null, error.message));
+    child.on('close', (code) => done(code));
   });
 }
 

@@ -1,5 +1,4 @@
 import type { FactoryConfig, FactoryJob, Harness, Project, ReviewRecord } from './types.ts';
-import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID as uuid } from 'node:crypto';
 import {
   existsSync,
@@ -12,19 +11,23 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
 import { options } from './cli.ts';
-import { eligibleReviewers, personalRoot, reviewerSettings } from './flow-config.ts';
+import { eligibleReviewers, personalRoot, reviewerSettings, workspaceRoot } from './flow-config.ts';
+import { boxCommand, boxName, checkImage, removeBox, type Box } from './factory-container.ts';
 import { loadProject, matches } from './project.ts';
 import { completeTask, pluginRoot, protectedPatterns } from './runtime.ts';
 import { reviewCommand } from './review.ts';
-import { digest, fingerprint, sessionKey, withState } from './state.ts';
+import { digest, fingerprint, sessionKey } from './state.ts';
 import { nested, planDigest, startTask } from './tasks.ts';
 import {
   agentEnv,
   agentStatus,
   runAgent,
+  runChild,
   scrubbedEnv,
+  type ChildResult,
+  type Wrapped,
   type AgentResult,
   type Stage,
 } from './factory-harness.ts';
@@ -40,6 +43,7 @@ import {
 } from './factory-ship.ts';
 import {
   activeRun,
+  factoryHome,
   jobProblems,
   lockHolder,
   createJob,
@@ -94,7 +98,32 @@ export function context(cwd: string): Context {
   if (!project.config.factory) {
     throw new Error('add a factory block to .halvard.json first; see docs/factory.md');
   }
-  return { project, root: project.root, factory: project.config.factory };
+  const ctx = { project, root: project.root, factory: project.config.factory };
+  checkMounts(ctx);
+  return ctx;
+}
+
+const real = (path: string) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
+
+const overlaps = (a: string, b: string) =>
+  a === b || a.startsWith(b.endsWith('/') ? b : `${b}/`) || b.startsWith(`${a}/`);
+
+// Extra mounts reach agent containers too, so none may expose what the runner owns: job
+// files and receipts, the main checkout, the task workspace, your settings or Docker.
+function checkMounts(ctx: Context) {
+  const owned = [factoryHome(), ctx.root, workspaceRoot(), personalRoot(), '/var/run', '/run'];
+  for (const { host } of ctx.factory.container?.mounts ?? []) {
+    // Real paths, so a link to a parent of the main checkout does not pass for something else.
+    const clash = real(host) === '/' ? '/' : owned.find((path) => overlaps(real(host), real(path)));
+    if (clash)
+      throw new Error(`factory container mount ${host} overlaps ${clash}, which the runner owns`);
+  }
 }
 
 // An empty gh configuration for agents, so the gh CLI there has no login.
@@ -102,6 +131,174 @@ function ghShield(ctx: Context, job: FactoryJob) {
   const dir = jobFile(ctx.root, job.id, 'gh-empty');
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
+}
+
+// In container mode a step runs in its own container, with the checkout and the listed
+// folders mounted at the same paths; otherwise it runs here with the scrubbed environment.
+function boxed(ctx: Context, job: FactoryJob, step: string, argv: string[], box: Box): Wrapped {
+  const config = ctx.factory.container;
+  if (!config) return { argv, cleanup: () => {} };
+  const name = boxName([basename(ctx.root), job.id, step]);
+  return { argv: boxCommand(config, name, box, argv), cleanup: () => removeBox(name) };
+}
+
+// The checkout writable, its Git directory read-only: a container that could write .git could
+// leave links there that the runner's own Git commands on the host write through.
+const checkoutMounts = (checkout: string) => [
+  { path: checkout, readonly: false },
+  { path: join(checkout, '.git'), readonly: true },
+];
+
+// Git on both sides of a fingerprint must read the same configuration; your global and
+// system files, such as a personal excludes file, exist only on the host.
+const ISOLATED_GIT = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+
+// Runs fn with Git reading only the repository's own configuration, in container mode, and
+// never starting an fsmonitor the clone's configuration names.
+function isolated<T>(ctx: Context, fn: () => T): T {
+  if (!ctx.factory.container) return fn();
+  const offset = Number(process.env.GIT_CONFIG_COUNT) || 0;
+  const extra = {
+    ...ISOLATED_GIT,
+    GIT_CONFIG_COUNT: String(offset + 1),
+    [`GIT_CONFIG_KEY_${offset}`]: 'core.fsmonitor',
+    [`GIT_CONFIG_VALUE_${offset}`]: 'false',
+  };
+  const saved = Object.keys(extra).map((key) => [key, process.env[key]] as const);
+  Object.assign(process.env, extra);
+  try {
+    return fn();
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+// A link or special file in the clone's Git directory would let Git on the host write
+// outside the clone; containers mount .git read-only, and this checks it before Git runs.
+function unsafeGitDir(checkout: string): string | null {
+  const walk = (dir: string): string | null => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      const stat = lstatSync(full);
+      if (stat.isDirectory()) {
+        const found = walk(full);
+        if (found) return found;
+      } else if (!stat.isFile()) {
+        return `${relative(checkout, full)} in the clone's Git directory is not a plain file`;
+      }
+    }
+    return null;
+  };
+  return walk(join(checkout, '.git'));
+}
+
+// The first submodule in the clone's index, if any.
+function gitlink(ctx: Context, checkout: string) {
+  const index = isolated(ctx, () => gitRunner(checkout, ['ls-files', '--stage', '-z']));
+  const link = index.split('\0').find((line) => line.startsWith('160000 '));
+  return link ? link.slice(link.indexOf('\t') + 1) : null;
+}
+
+// A repository inside the clone has a configuration and attributes the agent wrote, and the
+// host's Git would run its fsmonitor or filters while walking the tree. Containers may hold
+// none: no .git below the top, in any case, and no gitlink in the index. Folders Git ignores
+// are skipped, because the host's Git never walks them, and setup may leave a .git there.
+function nestedRepo(ctx: Context, checkout: string): string | null {
+  const ignored = new Set(
+    isolated(ctx, () =>
+      gitRunner(checkout, [
+        'ls-files',
+        '-z',
+        '--others',
+        '--ignored',
+        '--exclude-standard',
+        '--directory',
+      ]),
+    )
+      .split('\0')
+      .filter((path) => path.endsWith('/'))
+      .map((path) => path.slice(0, -1)),
+  );
+  const stack = [checkout];
+  while (stack.length) {
+    const dir = stack.pop()!;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.name.toLowerCase() === '.git') {
+        if (dir !== checkout) return `${relative(checkout, full)} is a nested repository`;
+        continue;
+      }
+      if (entry.isDirectory() && !ignored.has(relative(checkout, full))) stack.push(full);
+    }
+  }
+  const link = gitlink(ctx, checkout);
+  return link ? `${link} is a submodule` : null;
+}
+
+// Container mode builds no repository with submodules; that is a setting to change, not
+// tampering, so the job parks as infra before any agent runs.
+const baseSubmodule = (ctx: Context, checkout: string) => {
+  const link = ctx.factory.container ? gitlink(ctx, checkout) : null;
+  return link
+    ? `the base has the submodule ${link}, and container mode builds no repository with submodules`
+    : null;
+};
+
+// The variables the container block lists reach the container even when they look like
+// credentials, because you listed them; nothing else does.
+function listedEnv(ctx: Context) {
+  const names = ctx.factory.container?.env ?? [];
+  return Object.fromEntries(
+    names.flatMap((name) => (process.env[name] === undefined ? [] : [[name, process.env[name]!]])),
+  );
+}
+
+// The runner's state for a job's gate and review receipts in container mode. Agent
+// containers never mount it. Code the agent wrote runs in the gate's container, which does,
+// but trust rests on each step's own exit status and output, not on receipts found there.
+function stateFolder(ctx: Context, job: FactoryJob) {
+  const dir = jobFile(ctx.root, job.id, 'state');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return dir;
+}
+
+// The folders a runner step needs: the checkout, the receipts, the task workspace and,
+// read-only, your personal settings, which feed the configuration and the tree fingerprint.
+function runnerBox(ctx: Context, job: FactoryJob, checkout: string): Box {
+  const workspace = resolve(workspaceRoot(), basename(checkout));
+  mkdirSync(workspace, { recursive: true, mode: 0o700 });
+  const personal = resolve(personalRoot(), 'personal.json');
+  return {
+    workdir: checkout,
+    mounts: [
+      ...checkoutMounts(checkout),
+      { path: stateFolder(ctx, job), readonly: false },
+      { path: workspace, readonly: false },
+      // Only the settings file, by its real path, so a linked file reads the same inside.
+      ...(existsSync(personal)
+        ? [{ path: personal, readonly: true, source: realpathSync(personal) }]
+        : []),
+    ],
+    env: ['TMPDIR', 'HALVARD_HOME', 'HALVARD_WORKSPACE', ...Object.keys(ISOLATED_GIT)],
+  };
+}
+
+function runnerEnv(ctx: Context, job: FactoryJob) {
+  return scrubbedEnv(
+    ghShield(ctx, job),
+    ctx.factory.container
+      ? {
+          ...listedEnv(ctx),
+          ...ISOLATED_GIT,
+          TMPDIR: stateFolder(ctx, job),
+          HALVARD_HOME: personalRoot(),
+          HALVARD_WORKSPACE: workspaceRoot(),
+        }
+      : {},
+  );
 }
 
 export function park(ctx: Context, job: FactoryJob, reason: string, detail: string) {
@@ -237,9 +434,21 @@ async function agent(
     workspace,
     budgetUsd: remaining,
     config: ctx.factory,
-    env: agentEnv(stage, ghShield(ctx, job)),
+    env: { ...agentEnv(stage, ghShield(ctx, job)), ...listedEnv(ctx) },
     log: jobFile(ctx.root, job.id, 'agent.log'),
     timeoutSeconds: ctx.factory.timeouts[stage],
+    wrap: ctx.factory.container
+      ? (argv, scratch) =>
+          boxed(ctx, job, `${stage}-${harness}`, argv, {
+            workdir: cwd,
+            mounts: [
+              ...checkoutMounts(cwd),
+              { path: scratch, readonly: false },
+              ...(workspace !== cwd ? [{ path: workspace, readonly: false }] : []),
+            ],
+            env: ['HALVARD_UNATTENDED', ...(stage === 'plan' ? ['HALVARD_READONLY'] : [])],
+          })
+      : undefined,
     shouldStop: () => stopping || existsSync(jobFile(ctx.root, job.id, 'stop')),
   });
   job.costUsd += result.costUsd;
@@ -300,12 +509,30 @@ Do not run the independent review, do not mark the task done and do not commit: 
 ${note ? `\n${note}\n` : ''}
 End your final message with a line "STATUS: READY" when the gate passes, or "STATUS: BLOCKED: <reason>" when you cannot finish.`;
 
-export async function plan(ctx: Context, job: FactoryJob) {
+// The context with the container image pinned to the id that passed the version check.
+function pinned(ctx: Context): { ctx: Context; problem: string | null } {
+  const config = ctx.factory.container;
+  if (!config) return { ctx, problem: null };
+  const { problem, id } = checkImage(config);
+  if (problem || !id) return { ctx, problem: problem ?? `the image ${config.image} has no id` };
+  return {
+    ctx: { ...ctx, factory: { ...ctx.factory, container: { ...config, image: id } } },
+    problem: null,
+  };
+}
+
+export async function plan(context: Context, job: FactoryJob) {
+  let ctx = context;
   const unlock = lockJob(ctx.root, job.id);
   const worktree = worktreePath(ctx.root, job.id, '-plan');
   try {
+    const pin = pinned(ctx);
+    if (pin.problem) return park(ctx, job, 'infra', pin.problem);
+    ctx = pin.ctx;
     const base = baseRef(ctx.root, ctx.project.config.workflow.baseBranch);
-    freshWorktree(ctx, worktree, base);
+    freshCheckout(ctx, worktree, base);
+    const submodule = baseSubmodule(ctx, worktree);
+    if (submodule) return park(ctx, job, 'infra', submodule);
     const brief = readFileSync(jobFile(ctx.root, job.id, 'brief.md'), 'utf8');
     const result = await agent(ctx, job, 'plan', worktree, worktree, planPrompt(brief));
     if (result.error === 'interrupted') {
@@ -353,7 +580,7 @@ export async function plan(ctx: Context, job: FactoryJob) {
   } catch (err) {
     return park(ctx, job, 'infra', (err as Error).message);
   } finally {
-    exec('git', ['worktree', 'remove', '--force', worktree], ctx.root);
+    removeCheckout(ctx, worktree);
     unlock();
   }
 }
@@ -439,43 +666,56 @@ function approve(ctx: Context, job: FactoryJob, by: string) {
   return job;
 }
 
-// The gate and the review run in child processes with the scrubbed environment, because
-// both execute code the agent may have written.
+// The gate, the review and task-done run in child processes, in a container in container
+// mode, with the scrubbed environment, because they execute code the agent may have written.
 function runnerChild(
   ctx: Context,
   job: FactoryJob,
-  worktree: string,
+  checkout: string,
   args: string[],
-  timeout: number,
-) {
-  const result = spawnSync(process.execPath, [runner(), ...args], {
-    cwd: worktree,
-    encoding: 'utf8',
-    timeout,
-    maxBuffer: 32 * 1024 * 1024,
-    env: scrubbedEnv(ghShield(ctx, job)),
+  timeoutMs: number,
+): Promise<ChildResult> {
+  const { argv, cleanup } = ctx.factory.container
+    ? boxed(
+        ctx,
+        job,
+        args[0]!,
+        ['node', ctx.factory.container.runner, ...args],
+        runnerBox(ctx, job, checkout),
+      )
+    : { argv: [process.execPath, runner(), ...args], cleanup: () => {} };
+  return runChild(argv, {
+    cwd: checkout,
+    env: runnerEnv(ctx, job),
+    timeoutMs,
+    log: jobFile(ctx.root, job.id, 'runner.log'),
+    cleanup,
+    shouldStop: () => stopping || existsSync(jobFile(ctx.root, job.id, 'stop')),
   });
-  const log = jobFile(ctx.root, job.id, 'runner.log');
-  writeFileSync(
-    log,
-    `$ halvard ${args.join(' ')}\n${result.stdout ?? ''}${result.stderr ?? ''}\n`,
-    {
-      flag: 'a',
-      mode: 0o600,
-    },
-  );
-  return {
-    status: result.error ? null : result.status,
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
-  };
 }
 
+const reviewers = new Map<string, boolean>();
+
+// A reviewer counts when its CLI answers where the review runs: here, or in the image.
 function available(reviewer: string, ctx: Context) {
   const settings = reviewerSettings(ctx.project.config.workflow, ctx.factory.author, reviewer);
   if (!settings) return false;
   const binary = reviewCommand(reviewer, settings, '', '')[0]!;
-  return exec(binary, ['--version'], ctx.root, 10000).status === 0;
+  const config = ctx.factory.container;
+  if (!config) return exec(binary, ['--version'], ctx.root, 10000).status === 0;
+  const key = `${config.image}\0${binary}`;
+  if (!reviewers.has(key)) {
+    const run = exec(
+      'docker',
+      ['run', '--rm', '--network', 'none', config.image, binary, '--version'],
+      ctx.root,
+      120000,
+    );
+    // Only an answer is remembered; a failed check is tried again next time.
+    if (run.status !== 0) return false;
+    reviewers.set(key, true);
+  }
+  return true;
 }
 
 // Round 1 takes the first configured reviewer that answers; later rounds must keep it.
@@ -506,8 +746,11 @@ function reset(ctx: Context, job: FactoryJob) {
   // created it, so a retry cannot remove anything of the user's.
   const { featurePrefix, fixPrefix } = ctx.project.config.workflow;
   const branch = (job.fix ? fixPrefix : featurePrefix) + job.id;
-  exec('git', ['worktree', 'remove', '--force', worktreePath(ctx.root, job.id)], ctx.root);
-  if (job.branch === branch) exec('git', ['branch', '-D', branch], ctx.root);
+  removeCheckout(ctx, worktreePath(ctx.root, job.id));
+  // A clone's branch lives in the clone; a branch of that name here is yours.
+  if (!ctx.factory.container && job.branch === branch) {
+    exec('git', ['branch', '-D', branch], ctx.root);
+  }
   Object.assign(job, {
     stage: 'approved',
     worktree: null,
@@ -583,11 +826,54 @@ function testDigest(worktree: string, dir: string) {
   }
 }
 
-// A worktree left by a runner that died is the factory's own; remove it before reuse.
-function freshWorktree(ctx: Context, path: string, base: string) {
-  exec('git', ['worktree', 'remove', '--force', path], ctx.root);
-  exec('git', ['worktree', 'prune'], ctx.root);
-  gitRunner(ctx.root, ['worktree', 'add', '--quiet', '--detach', path, base]);
+// The full name of the base, which a clone fetches from the main checkout.
+const fullRef = (ctx: Context, base: string) =>
+  hasOrigin(ctx.root)
+    ? `refs/remotes/${base}`
+    : `refs/heads/${ctx.project.config.workflow.baseBranch}`;
+
+// A checkout left by a runner that died is the factory's own; remove it before reuse.
+function removeCheckout(ctx: Context, path: string) {
+  if (ctx.factory.container) {
+    rmSync(path, { recursive: true, force: true });
+  } else {
+    exec('git', ['worktree', 'remove', '--force', path], ctx.root);
+    exec('git', ['worktree', 'prune'], ctx.root);
+  }
+}
+
+// A worktree normally. In container mode a standalone clone instead, because a worktree's
+// Git directory lies in the main checkout, which a container must not mount.
+function freshCheckout(ctx: Context, path: string, base: string) {
+  removeCheckout(ctx, path);
+  if (!ctx.factory.container) {
+    gitRunner(ctx.root, ['worktree', 'add', '--quiet', '--detach', path, base]);
+    return;
+  }
+  gitRunner(ctx.root, ['clone', '--quiet', '--no-hardlinks', '--no-checkout', ctx.root, path]);
+  gitRunner(path, ['remote', 'remove', 'origin']);
+  gitRunner(path, ['fetch', '--quiet', ctx.root, `+${fullRef(ctx, base)}:refs/factory/base`]);
+  gitRunner(path, ['checkout', '--quiet', '--detach', 'refs/factory/base']);
+  // The runner commits in the clone, so it takes your identity from the main checkout.
+  for (const key of ['user.name', 'user.email']) {
+    const value = exec('git', ['config', key], ctx.root).stdout.trim();
+    if (value) gitRunner(path, ['config', key, value]);
+  }
+}
+
+// The base as the checkout sees it, after the main checkout fetched it again.
+function latestBase(ctx: Context, checkout: string, base: string) {
+  const latest = hasOrigin(ctx.root)
+    ? baseRef(ctx.root, ctx.project.config.workflow.baseBranch)
+    : base;
+  if (!ctx.factory.container) return latest;
+  gitRunner(checkout, [
+    'fetch',
+    '--quiet',
+    ctx.root,
+    `+${fullRef(ctx, latest)}:refs/factory/latest`,
+  ]);
+  return 'refs/factory/latest';
 }
 
 // Git configuration in every scope the runner's own Git commands read. The agent runs as
@@ -631,14 +917,20 @@ export async function build(
   }
 }
 
-async function work(ctx: Context, job: FactoryJob, push: boolean, rework: string) {
+async function work(context: Context, job: FactoryJob, push: boolean, rework: string) {
+  let ctx = context;
   try {
+    const pin = pinned(ctx);
+    if (pin.problem) return park(ctx, job, 'infra', pin.problem);
+    ctx = pin.ctx;
     const worktree = worktreePath(ctx.root, job.id);
     const base = baseRef(ctx.root, ctx.project.config.workflow.baseBranch);
     const pushUrl = hasOrigin(ctx.root)
       ? exec('git', ['remote', 'get-url', '--push', 'origin'], ctx.root).stdout.trim()
       : null;
-    freshWorktree(ctx, worktree, base);
+    freshCheckout(ctx, worktree, base);
+    const submodule = baseSubmodule(ctx, worktree);
+    if (submodule) return park(ctx, job, 'infra', submodule);
     const planText = job.plan
       ? readFileSync(jobFile(ctx.root, job.id, 'plan.md'), 'utf8')
       : undefined;
@@ -675,30 +967,31 @@ async function work(ctx: Context, job: FactoryJob, push: boolean, rework: string
     const expectedPlan = planText === undefined ? null : planDigest(nested(planText));
     // Run after setup and after every agent run, before the runner trusts the tree.
     const tampering = () =>
-      gitConfig(worktree) !== config
+      (ctx.factory.container ? (unsafeGitDir(worktree) ?? nestedRepo(ctx, worktree)) : null) ??
+      (gitConfig(worktree) !== config
         ? 'Git configuration changed during the run'
         : job.tests && testDigest(worktree, job.tests.dir) !== job.tests.digest
           ? `the frozen acceptance tests in ${job.tests.dir} changed`
-          : guardedChanges(worktree, started.base, guarded)
+          : isolated(ctx, () => guardedChanges(worktree, started.base, guarded))
               .map((file) => `changed ${file}`)
-              .join('\n') || null;
+              .join('\n') || null);
     for (const step of ctx.factory.setup) {
-      const run = spawnSync(step[0]!, step.slice(1), {
-        cwd: worktree,
-        encoding: 'utf8',
-        timeout: 20 * 60 * 1000,
-        env: scrubbedEnv(ghShield(ctx, job)),
-        maxBuffer: 32 * 1024 * 1024,
+      const { argv, cleanup } = boxed(ctx, job, 'setup', step, {
+        workdir: worktree,
+        mounts: checkoutMounts(worktree),
+        env: [],
       });
-      writeFileSync(
-        jobFile(ctx.root, job.id, 'setup.log'),
-        `$ ${step.join(' ')}\n${run.stdout}${run.stderr}`,
-        {
-          flag: 'a',
-          mode: 0o600,
-        },
-      );
+      const run = await runChild(argv, {
+        cwd: worktree,
+        env: { ...scrubbedEnv(ghShield(ctx, job)), ...listedEnv(ctx) },
+        timeoutMs: 20 * 60 * 1000,
+        log: jobFile(ctx.root, job.id, 'setup.log'),
+        cleanup,
+        shouldStop: () => stopping || existsSync(jobFile(ctx.root, job.id, 'stop')),
+      });
       if (run.status !== 0) {
+        const stopped = halted(ctx, job);
+        if (stopped) return park(ctx, job, 'stopped-by-human', stopped);
         return park(ctx, job, 'infra', `setup step ${step.join(' ')} failed; see setup.log`);
       }
     }
@@ -797,8 +1090,20 @@ async function work(ctx: Context, job: FactoryJob, push: boolean, rework: string
       job.stage = 'gating';
       saveJob(ctx.root, job);
       const key = sessionKey(worktree, 'factory', `${job.id}-${uuid()}`);
-      const gate = runnerChild(ctx, job, worktree, ['gate', key], 21 * 60 * 1000);
+      const gate = await runnerChild(ctx, job, worktree, ['gate', key], 21 * 60 * 1000);
       recordEvent(ctx.root, job.id, 'gate', { passed: gate.status === 0 });
+      // A stop ends the gate's process; that is the stop, not a failure of the gate.
+      const stopped = gate.status === 0 ? null : halted(ctx, job);
+      if (stopped) return park(ctx, job, 'stopped-by-human', stopped);
+      // Docker itself failing is not the agent's failure: no daemon, no image, a clash.
+      if (ctx.factory.container && (gate.status === null || gate.status === 125)) {
+        return park(
+          ctx,
+          job,
+          'infra',
+          `the gate container did not run: ${gate.stderr.trim().slice(-2000)}`,
+        );
+      }
       if (gate.status !== 0) {
         const tail = (gate.stdout + gate.stderr).trim().split('\n').slice(-60).join('\n');
         if (job.fixPasses >= ctx.factory.maxFixPasses) return park(ctx, job, 'gate-failed', tail);
@@ -824,7 +1129,7 @@ async function work(ctx: Context, job: FactoryJob, push: boolean, rework: string
       job.reviewer = reviewer;
       job.round++;
       saveJob(ctx.root, job);
-      const review = runnerChild(
+      const review = await runnerChild(
         ctx,
         job,
         worktree,
@@ -843,6 +1148,8 @@ async function work(ctx: Context, job: FactoryJob, push: boolean, rework: string
         (ctx.project.config.workflow.reviewTimeout + 120) * 1000,
       );
       if (review.status !== 0 && review.status !== 2) {
+        const stopped = halted(ctx, job);
+        if (stopped) return park(ctx, job, 'stopped-by-human', stopped);
         return park(
           ctx,
           job,
@@ -875,10 +1182,12 @@ async function work(ctx: Context, job: FactoryJob, push: boolean, rework: string
       if (late) return park(ctx, job, 'tampered', late);
       const beforeShip = halted(ctx, job);
       if (beforeShip) return park(ctx, job, 'stopped-by-human', beforeShip);
-      return ship(ctx, job, {
+      // Awaited, so a failure while shipping parks the job like any other.
+      return await ship(ctx, job, {
         worktree,
         task: started.task,
-        base,
+        // A clone knows the base only by the name it fetched it under.
+        base: ctx.factory.container ? 'refs/factory/base' : base,
         key,
         record,
         push: push ? pushUrl : null,
@@ -915,16 +1224,35 @@ async function ship(
 ) {
   job.stage = 'shipping';
   saveJob(ctx.root, job);
-  const done = await completeTask(worktree, task, key, { plan: expectedPlan });
-  const gate = await withState(worktree, key, (state) => state.pass);
+  // task-done reads the receipts where the gate and review wrote them, here or in a
+  // container, with the plan digest the runner holds.
+  const finished = await runnerChild(
+    ctx,
+    job,
+    worktree,
+    ['task-done', task, '--gate-session', key, '--plan', expectedPlan ?? 'none'],
+    5 * 60 * 1000,
+  );
+  if (finished.status !== 0) {
+    const stopped = halted(ctx, job);
+    if (stopped) return park(ctx, job, 'stopped-by-human', stopped);
+    return park(ctx, job, 'infra', `task-done failed: ${finished.stderr.trim().slice(-2000)}`);
+  }
+  const done = JSON.parse(finished.stdout) as Awaited<ReturnType<typeof completeTask>>;
+  const gate = done.gate;
   if (!gate) throw new Error('the gate receipt disappeared before shipping');
-  const files = changedFiles(worktree, base);
+  const files = isolated(ctx, () => changedFiles(worktree, base));
   const risk = riskLevel(files, ctx.factory.riskPaths);
   // Only the reviewed tree plus the status line goes into the commit.
-  if (fingerprint(worktree) !== done.final) {
+  const unsafe = ctx.factory.container
+    ? (unsafeGitDir(worktree) ?? nestedRepo(ctx, worktree))
+    : null;
+  if (unsafe) return park(ctx, job, 'tampered', unsafe);
+  if (isolated(ctx, () => fingerprint(worktree)) !== done.final) {
     return park(ctx, job, 'tampered', 'the tree changed after the review');
   }
-  gitRunner(worktree, ['add', '--all']);
+  // The same configuration as the fingerprint, so the commit holds exactly the reviewed tree.
+  isolated(ctx, () => gitRunner(worktree, ['add', '--all']));
   gitRunner(worktree, [
     'commit',
     '--quiet',
@@ -933,12 +1261,14 @@ async function ship(
     '-m',
     `Halvard factory job ${job.id}.${job.issue ? ` Refs #${job.issue.number}.` : ''}`,
   ]);
-  if (gitRunner(worktree, ['status', '--porcelain']).trim()) {
+  if (
+    isolated(ctx, () =>
+      gitRunner(worktree, ['status', '--porcelain', '--ignore-submodules=all']),
+    ).trim()
+  ) {
     return park(ctx, job, 'tampered', 'files changed while the runner committed');
   }
-  const latest = hasOrigin(ctx.root)
-    ? baseRef(ctx.root, ctx.project.config.workflow.baseBranch)
-    : base;
+  const latest = latestBase(ctx, worktree, base);
   const merge = exec('git', ['merge-tree', '--write-tree', latest, 'HEAD'], worktree);
   if (merge.status !== 0) {
     return park(

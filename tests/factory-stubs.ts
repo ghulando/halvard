@@ -49,6 +49,32 @@ if (a === 'issue' && b === 'list') {
 }
 `;
 
+// A docker CLI stand-in: docker run executes the command here, in the -w folder, with only
+// PATH, HOME and the variables named by -e, and logs the arguments. docker rm does nothing.
+const dockerStub = `#!${process.execPath}
+const fs = require('fs');
+const args = process.argv.slice(2);
+if (process.env.STUB_DOCKER_LOG) fs.appendFileSync(process.env.STUB_DOCKER_LOG, JSON.stringify(args) + '\\n');
+if (args[0] === 'image') process.exit(args.at(-1).startsWith('missing') ? 1 : (console.log('sha256:stub'), 0));
+if (args[0] !== 'run') process.exit(0);
+if (process.env.STUB_DOCKER_FAIL && args.includes(process.env.STUB_DOCKER_FAIL)) process.exit(125);
+const env = { PATH: process.env.PATH, HOME: process.env.HOME };
+let cwd = process.cwd();
+let i = 1;
+const valued = new Set(['--name', '--user', '--cap-drop', '--security-opt', '--pids-limit', '--memory', '--cpus', '--network', '-w', '-v', '--mount', '-e']);
+for (; i < args.length; i++) {
+  const arg = args[i];
+  if (!arg.startsWith('-')) break;
+  if (!valued.has(arg)) continue;
+  const value = args[++i];
+  if (arg === '-w') cwd = value;
+  if (arg === '-e' && process.env[value] !== undefined) env[value] = process.env[value];
+}
+const command = args.slice(i + 1);
+const result = require('child_process').spawnSync(command[0], command.slice(1), { cwd, env, stdio: 'inherit' });
+process.exit(result.status === null ? 1 : result.status);
+`;
+
 export interface GithubState {
   issues: {
     number: number;
@@ -179,10 +205,11 @@ if (args.includes('--version')) { console.log(name + ' 1.0.0'); process.exit(0);
 const prompt = name === 'grok' ? fs.readFileSync(args[args.indexOf('--prompt-file') + 1], 'utf8') : args[args.length - 1];
 const reviewer = args.includes('--tools') || prompt.includes('independent read-only reviewer') || prompt.startsWith('Review the evidence');
 const reply = (text, cost) => process.stdout.write(JSON.stringify(name === 'grok' ? { text } : { result: text, total_cost_usd: cost, is_error: false }));
-fs.appendFileSync(process.env.STUB_LOG, JSON.stringify({
+if (process.env.STUB_SLEEP) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.STUB_SLEEP));
+if (process.env.STUB_LOG) fs.appendFileSync(process.env.STUB_LOG, JSON.stringify({
   name, reviewer, args, cwd: process.cwd(), prompt: prompt.slice(0, 4000),
   unattended: process.env.HALVARD_UNATTENDED ?? null, readonly: process.env.HALVARD_READONLY ?? null,
-  ghToken: process.env.GH_TOKEN ?? null, gitConfig: process.env.GIT_CONFIG_COUNT ?? null,
+  ghToken: process.env.GH_TOKEN ?? null, gitConfig: process.env.GIT_CONFIG_COUNT ?? null, npmToken: process.env.NPM_TOKEN ?? null,
 }) + '\\n');
 if (reviewer) {
   const blocked = process.env.STUB_REVIEW === 'blocked';
@@ -218,6 +245,17 @@ if (prompt.includes('planning agent')) {
   process.stdout.write(JSON.stringify({ result: '## Acceptance criteria\\n\\n1. source.txt says implemented.\\n\\n## Plan\\n\\n1. Edit source.txt.\\n\\n## Out of scope\\n\\nNothing else.\\n\\n## Assumptions\\n\\nNone.', total_cost_usd: 0.05, is_error: false }));
   process.exit(0);
 }
+if (process.env.STUB_AGENT === 'nested') {
+  const sub = path.join(process.cwd(), 'sub');
+  require('child_process').execFileSync('git', ['init', '-q', sub]);
+  require('child_process').execFileSync('git', ['config', 'core.fsmonitor', 'touch ' + process.env.STUB_VICTIM], { cwd: sub });
+}
+if (process.env.STUB_AGENT === 'ignored-nested') {
+  fs.writeFileSync(path.join(process.cwd(), '.gitignore'), 'cache/\\n');
+  require('child_process').execFileSync('git', ['init', '-q', path.join(process.cwd(), 'cache', 'dep')]);
+}
+if (process.env.STUB_AGENT === 'gitlink') fs.symlinkSync(process.env.STUB_VICTIM, path.join(process.cwd(), '.git', 'COMMIT_EDITMSG'));
+if (process.env.STUB_AGENT === 'log') fs.writeFileSync(path.join(process.cwd(), 'out.log'), 'build output\\n');
 if (process.env.STUB_AGENT === 'gitconfig') {
   require('child_process').execFileSync('git', ['config', 'credential.helper', '!echo stolen'], { cwd: process.cwd() });
 }
@@ -237,6 +275,10 @@ process.stdout.write(JSON.stringify({ result: 'Done.\\nSTATUS: READY', total_cos
   }
   writeFileSync(join(dir, 'gh'), ghStub);
   chmodSync(join(dir, 'gh'), 0o755);
+  writeFileSync(join(dir, 'docker'), dockerStub);
+  chmodSync(join(dir, 'docker'), 0o755);
+  const dockerLog = join(dir, 'docker.jsonl');
+  writeFileSync(dockerLog, '');
   const state = join(dir, 'gh-state.json');
   writeFileSync(
     state,
@@ -252,6 +294,7 @@ process.stdout.write(JSON.stringify({ result: 'Done.\\nSTATUS: READY', total_cos
     PATH: `${dir}:${process.env.PATH}`,
     STUB_LOG: log,
     STUB_GH_STATE: state,
+    STUB_DOCKER_LOG: dockerLog,
     HALVARD_FACTORY_HOME: home,
     GH_TOKEN: 'secret-test-token',
   });
@@ -271,7 +314,13 @@ process.stdout.write(JSON.stringify({ result: 'Done.\\nSTATUS: READY', total_cos
             readonly: string | null;
             ghToken: string | null;
             gitConfig: string | null;
+            npmToken: string | null;
           },
       );
-  return Object.assign(calls, { github: github(state) });
+  const docker = () =>
+    readFileSync(dockerLog, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as string[]);
+  return Object.assign(calls, { github: github(state), docker, dir, script });
 }

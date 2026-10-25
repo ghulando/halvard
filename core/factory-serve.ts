@@ -74,7 +74,34 @@ const runnerAlive = (ctx: Context, id: string) =>
 
 const labels = (issue: { labels: { name: string }[] }) => issue.labels.map((label) => label.name);
 
+// Up to size jobs run side by side; the daemon still decides about one job at a time.
+function pool(size: number) {
+  const running = new Set<Promise<unknown>>();
+  const free = async () => {
+    while (running.size >= size) await Promise.race(running);
+  };
+  return {
+    // Wait for a free slot before checking the budget, so a finished job's spend counts.
+    free,
+    async start(task: () => Promise<unknown>) {
+      await free();
+      const promise: Promise<unknown> = task().finally(() => running.delete(promise));
+      running.add(promise);
+    },
+    drain: () => Promise.all(running),
+  };
+}
+
 export async function cycle(ctx: Context) {
+  const jobs = pool(ctx.factory.concurrency);
+  try {
+    await decide(ctx, jobs);
+  } finally {
+    await jobs.drain();
+  }
+}
+
+async function decide(ctx: Context, jobs: ReturnType<typeof pool>) {
   // A tampered run or an unreadable job file needs a human before anything starts.
   const blocked = blocker(ctx.root);
   if (blocked) {
@@ -106,6 +133,7 @@ export async function cycle(ctx: Context) {
           ? listed.updated
           : null;
     if (since && labeledBy(ctx, issue, 'factory:retry', since)) {
+      await jobs.free();
       if (!underBudget(ctx)) continue;
       gh(ctx.root, [
         'issue',
@@ -116,16 +144,19 @@ export async function cycle(ctx: Context) {
         '--remove-label',
         'factory:parked',
       ]);
-      const go = await step(ctx, id, () =>
-        listed.small || listed.plan?.approvedBy
-          ? build(ctx, id, true, { retry: true })
-          : replan(ctx, id),
+      if (stopRequested()) return;
+      await jobs.start(() =>
+        step(ctx, id, () =>
+          listed.small || listed.plan?.approvedBy
+            ? build(ctx, id, true, { retry: true })
+            : replan(ctx, id),
+        ),
       );
-      if (!go) return;
       continue;
     }
     // An approved job builds, whether its label came now or it was approved and never built.
     if (['awaiting-approval', 'approved'].includes(listed.stage) && !runnerAlive(ctx, id)) {
+      await jobs.free();
       if (!underBudget(ctx)) continue;
       let ready = false;
       const go = await step(ctx, id, () => {
@@ -138,7 +169,7 @@ export async function cycle(ctx: Context) {
           ) ?? false;
       });
       if (!go) return;
-      if (ready && !(await step(ctx, id, () => build(ctx, id, true)))) return;
+      if (ready) await jobs.start(() => step(ctx, id, () => build(ctx, id, true)));
     }
   }
 
@@ -178,20 +209,23 @@ export async function cycle(ctx: Context) {
       say(`issue #${issue.number}: a job folder issue-${issue.number} holds other work; skipped`);
       continue;
     }
+    await jobs.free();
     if (!underBudget(ctx)) return;
     const small =
       labels(issue).includes('factory:small') &&
       labeledBy(ctx, issue.number, 'factory:small', null) !== null;
-    const go = await step(ctx, `issue #${issue.number}`, async () => {
-      const job: FactoryJob = newJob(
-        ctx,
-        issueSource(ctx, issue.number),
-        small,
-        labels(issue).includes('bug'),
-      );
-      return small ? build(ctx, job.id, true) : plan(ctx, job);
-    });
-    if (!go) return;
+    if (stopRequested()) return;
+    // The job exists before the next issue is considered; the work itself runs in the pool.
+    let job: FactoryJob;
+    try {
+      job = newJob(ctx, issueSource(ctx, issue.number), small, labels(issue).includes('bug'));
+    } catch (err) {
+      say(`issue #${issue.number}: ${(err as Error).message}`);
+      continue;
+    }
+    await jobs.start(() =>
+      step(ctx, job.id, () => (small ? build(ctx, job.id, true) : plan(ctx, job))),
+    );
   }
 }
 

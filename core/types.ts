@@ -158,6 +158,25 @@ export interface FactoryConfig {
   pollSeconds: number;
   // A second harness writes acceptance tests the builder may not change.
   tests: { by: Harness; dir: string } | null;
+  // Jobs factory serve works at the same time.
+  concurrency: number;
+  // When set, every job gets its own clone, and agents, setup, the gate and the review run
+  // in containers of this image.
+  container: ContainerConfig | null;
+}
+
+export interface ContainerConfig {
+  image: string;
+  // A Docker network whose egress you limit; none gives no network at all.
+  network: string;
+  // Names of host variables passed into the containers, such as model API keys.
+  env: string[];
+  // Extra bind mounts, host:container[:ro], such as a harness login file.
+  mounts: { host: string; container: string; readonly: boolean }[];
+  // The Halvard runner inside the image.
+  runner: string;
+  memory: string | null;
+  cpus: number | null;
 }
 
 export type FactoryStage =

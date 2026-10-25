@@ -2,7 +2,7 @@
 
 Factory mode runs one task end to end without you at the keyboard. It is the third way to use Halvard, next to solo and team. A runner, which is plain code and not a model, starts a harness headless in its own worktree. The runner runs the gate and the cross-harness review itself, commits, pushes the branch and opens a pull request. You approve the plan for larger tasks, decide parked jobs and merge every pull request.
 
-You can start jobs from your terminal, or let `factory serve` pick up labeled GitHub issues. Jobs run one at a time, each in a worktree on your machine. Containers come in a later phase.
+You can start jobs from your terminal, or let `factory serve` pick up labeled GitHub issues. Each job gets a worktree on your machine, or, with a `container` block, a clone whose agents, setup, gate and review run in containers.
 
 ## Flow
 
@@ -65,6 +65,8 @@ Add a `factory` block to `.halvard.json`. Every key is optional:
 | `riskPaths` | CI and harness settings | Extra patterns that mark a pull request high risk. CI, `.halvard.json` and the harness settings directories are always included. |
 | `monthlyUsd` | 200 | Agent spend per calendar month (UTC), summed from the cost each agent run reports. Reviewer runs report no cost, so their spend is not counted. `factory serve` starts no new work, approved builds or retries once 90% of it is spent. |
 | `pollSeconds` | 300 | How often `factory serve` checks GitHub, 60 to 3600 seconds. |
+| `concurrency` | 1 | Jobs `factory serve` works at the same time, 1 to 4. Each starts only after a slot frees and the budget still allows it, so jobs already running can take the month a little past 90%. A pass waits for its jobs before the next poll, so a long job delays new issues and labels until it ends. |
+| `container` | none | Run every step in containers; see [Containers](#containers). |
 | `tests` | none | Frozen acceptance tests. Before the build, the harness named in `by` writes tests for the task's acceptance criteria under `<dir>/<job>/` and nowhere else. The builder must make them pass and may not change them. It must be a different harness from `author`, and your gate must run the tests in that folder. Only that folder is frozen: the builder can still change the test runner's configuration or scripts, so add them to `riskPaths` and read them in the pull request. |
 
 `gh` must be logged in on your machine for issues and pull requests. Without an `origin` remote, the runner builds from the local base branch and only commits.
@@ -114,6 +116,78 @@ Every label counts only if someone with write access to the repository added it;
 | `factory:retry` | you | Starts a parked job again |
 | `factory:parked` | the runner | The job is parked; the comment says why |
 
+## Containers
+
+Without a `container` block the agent runs as you, on your machine. With one, each job gets a standalone clone, and every step that runs agent or repository code runs in a fresh container: the plan and build runs, the test writer, setup, the gate, the review and `task-done`.
+
+```json
+{
+  "factory": {
+    "container": {
+      "image": "halvard-factory:0.0.1",
+      "network": "factory-egress",
+      "env": ["ANTHROPIC_API_KEY", "XAI_API_KEY", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"],
+      "mounts": [],
+      "runner": "/opt/halvard/bin/halvard.ts",
+      "memory": "6g",
+      "cpus": 2
+    }
+  }
+}
+```
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `image` | required | The image every step runs in. |
+| `network` | `none` | A Docker network. `none` gives no network at all; `host` is refused. |
+| `env` | the model keys of the five harnesses | Host variables passed into the containers by name, even ones that look like credentials, because you listed them. Nothing else from your environment goes in. `PATH`, `HOME`, `TMPDIR` and `HALVARD_`, `GIT_`, `DOCKER_`, `GH_`, `GITHUB_` and `SSH_` names are refused, so GitHub and SSH credentials stay with the runner. |
+| `mounts` | none | Extra bind mounts as `/host/path:/container/path[:ro]`, such as a harness login file for subscription auth. They reach every container, agents included, so a mount that overlaps the factory folder, the main checkout, the task workspace, your Halvard settings or `/var/run` is refused. A missing host path fails the step instead of being created. |
+| `runner` | `/opt/halvard/bin/halvard.ts` | Halvard inside the image. Its version must equal the runner's, or the job parks before any agent runs. Every step of the job then runs the image by the id that passed this check, so rebuilding the tag mid-job changes nothing. |
+| `memory`, `cpus` | none | Docker limits per container. |
+
+Every container runs with `--cap-drop ALL`, `--security-opt no-new-privileges`, a process limit, your user and group id, and only these mounts, each at its host path so Git and Halvard see the same tree in both:
+
+| Step | Mounts |
+| --- | --- |
+| Plan, build, test writer | The clone, the agent's prompt folder and the task workspace |
+| Setup | The clone |
+| Gate, review, `task-done` | The clone, the job's receipt folder, the task workspace, and your personal Halvard settings file read-only |
+
+Every container gets the clone's `.git` folder read-only, and the runner checks it for links and special files before Git runs on the host, because Git writes through a link it finds there. For the same reason a job parks as tampered when the agent leaves a nested repository or a submodule outside the folders Git ignores: Git on the host would run that repository's fsmonitor and filters. Container mode therefore does not build repositories with submodules; a job whose base has one parks as `infra` before any agent runs.
+
+The split matters. Your GitHub login, SSH keys, Git credentials and the rest of your home folder are never mounted, and the runner on the host does every fetch, push and `gh` call. The agent's containers never mount the receipt folder. Code the agent wrote does run in the gate's container, which mounts it, but the runner trusts each step's own exit status and output, never a receipt it finds lying there. A clone, unlike a worktree, has its own Git directory, so no container reaches your main checkout. The runner removes each container by name when its step ends, times out or is stopped, and removes every container still running when the runner exits, including on a second Ctrl-C. Docker failing to start a gate, for a missing image or a stopped daemon, parks the job as `infra` rather than counting as a failed gate.
+
+Host and container compute the same tree fingerprint only if Git reads the same configuration on both sides, so in container mode the runner's fingerprint and the containers ignore your global and system Git configuration, a personal excludes file included. A file ignored only there counts as part of the tree; list build output in the project's `.gitignore`.
+
+### The image
+
+The image needs Node 22.18 or newer, Git, the harness CLIs you use, and Halvard at `runner`, registered with each harness and with hook trust approved. Approving hook trust is your decision; make it once, while you build the image. Containers run with your user id, so give the image a user with the same id and a home folder it owns:
+
+```dockerfile
+FROM node:22
+ARG UID=1000
+# A user with your id, whose home holds the harnesses' settings
+RUN useradd --uid "$UID" --create-home factory 2>/dev/null || usermod --login factory --home /home/factory --move-home "$(id -nu "$UID")"
+COPY halvard /opt/halvard
+RUN npm install -g @anthropic-ai/claude-code @xai-official/grok
+USER factory
+# Register Halvard with each harness as docs/install.md describes, and approve hook trust.
+```
+
+Build it with the same Halvard version you run the factory from, for example `docker build --build-arg UID=$(id -u) -t halvard-factory:0.0.1 .`, and rebuild it when you update Halvard.
+
+### Limiting the network
+
+A step needs the network only for model APIs, the package registry during setup, and whatever your gate fetches. An internal Docker network has no route out; a proxy attached to it and to a normal network lets through only the hosts you list:
+
+```sh
+docker network create --internal factory-egress
+docker run -d --name factory-proxy --network bridge <a forward proxy image with an allowlist>
+docker network connect factory-egress factory-proxy
+```
+
+Allow the model API hosts of your harnesses and your package registry. Pass `HTTPS_PROXY` and `HTTP_PROXY` pointing at the proxy through `env`. A request the proxy refuses fails the step that made it, which parks the job with that step's output.
+
 ## Board and metrics
 
 `factory board` writes `~/.halvard-factory/<repo>/board.html`: one static page, no script, that your browser reloads every 30 seconds. It shows every job by stage, its reviewer and round, cost, pull request and why it parked, under a row of numbers. `factory metrics` prints the same numbers as JSON:
@@ -141,9 +215,9 @@ Every label counts only if someone with write access to the repository added it;
 
 - **Tests the builder did not write.** With `tests` set, another harness writes the acceptance tests first, inside their folder only. The runner records a digest of them and parks the job if they change.
 
-### What a run on your machine does not protect against
+### What a run without containers does not protect against
 
-Until the container phase, the agent runs as you, with a shell, on your machine. The guard and the runner's checks catch mistakes and an agent that follows a misleading instruction. They are not a boundary against an agent that sets out to do harm. Such an agent could read your `gh` login, `~/.git-credentials` or SSH keys from disk, rewrite your other branches through Git, or edit job files with a shell command. Run the factory only on repositories and issues whose authors you trust, and use each harness's own sandbox where it has one. Containers with only model credentials come in a later phase.
+Without a `container` block, the agent runs as you, with a shell, on your machine. The guard and the runner's checks catch mistakes and an agent that follows a misleading instruction. They are not a boundary against an agent that sets out to do harm. Such an agent could read your `gh` login, `~/.git-credentials` or SSH keys from disk, rewrite your other branches through Git, or edit job files with a shell command. Run the factory only on repositories and issues whose authors you trust, and use each harness's own sandbox where it has one, or use containers. In container mode the agent still holds the model keys you pass in, and it can reach whatever the container's network allows.
 
 Before you use Grok as the author, run the headless probes from the factory research: whether a Grok hook decision holds headless, and with `--always-approve`, is not yet verified. Add `--always-approve` to `harnessArgs.grok` only after those probes pass.
 
@@ -157,7 +231,8 @@ Before you use Grok as the author, run the headless probes from the factory rese
 | `…/agent.log`, `…/runner.log`, `…/setup.log` | Agent output, gate and review output, setup output |
 | `…/evidence.md`, `…/evidence.json` | The pull request body and the receipts behind it |
 | `…/stop`, `…/rework-<time>.md` | A stop request from `factory stop`, and your rework notes |
-| `~/.halvard-factory/<repo>/worktrees/<repo>-<job>` | The job's worktree on its task branch |
+| `…/state` | Container mode: the gate and review receipts, which only runner steps mount |
+| `~/.halvard-factory/<repo>/worktrees/<repo>-<job>` | The job's worktree, or its clone in container mode, on its task branch |
 | `~/.halvard-factory/<repo>/board.html` | The board |
 
 `HALVARD_FACTORY_HOME` moves the whole folder. Team files and review summaries stay in the task workspace, `~/.halvard/<repo>-<job>/<job>/`.

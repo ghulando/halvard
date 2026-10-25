@@ -16,7 +16,7 @@ const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
   bootstrap-apply <repo> <plan>     Apply a confirmed, current bootstrap plan
   task-start <id> <title> --author <harness> [--fix] [--small]
              [--brief <file>] [--base <ref>] [--plan <file> --approved-by <name>]
-  task-done <task-file> --gate-session <session-key>
+  task-done <task-file> --gate-session <session-key> [--plan <digest>|none]
                                     Mark done when the session's gate and the review cover this tree
   task-resume <task-file>           Read portable task and current worktree
   task-handoff <task-file> --author <harness>
@@ -158,7 +158,19 @@ try {
       }
       case 'task-done': {
         const { completeTask } = await import('../core/runtime.ts');
-        print(await completeTask(process.cwd(), positional[0]!, flags['gate-session'] as string));
+        // A runner passes the approved plan's digest it holds, or none for a task without one.
+        const plan = flags.plan as string | undefined;
+        if (plan !== undefined && plan !== 'none' && !/^[a-f0-9]{64}$/.test(plan)) {
+          throw new Error('--plan takes a plan digest or none');
+        }
+        print(
+          await completeTask(
+            process.cwd(),
+            positional[0]!,
+            flags['gate-session'] as string,
+            plan === undefined ? undefined : { plan: plan === 'none' ? null : plan },
+          ),
+        );
         break;
       }
       case 'task-resume': {

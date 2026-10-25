@@ -407,21 +407,19 @@ test('the dry run reports which pull requests would have merged, and human edits
     [guidance]: pull('OPEN', sha(10)),
   };
   calls.github.write(state);
-  let report: {
+  // The real command in its own process: the test runner writes its own messages to this
+  // process's stdout, so capturing it here would mix them in.
+  const report = JSON.parse(
+    execFileSync(process.execPath, [join(pluginRoot, 'bin/halvard.ts'), 'factory', 'automerge'], {
+      cwd: root,
+      encoding: 'utf8',
+    }),
+  ) as {
     enabled: boolean;
     merged: { job: string; qualifies: boolean; reasons: string[] }[];
     open: { job: string; qualifies: boolean; reasons: string[] }[];
     classes: Record<string, { merged: number; humanEdited: number; rate: number }>;
-  } | null = null;
-  const write = process.stdout.write.bind(process.stdout);
-  let out = '';
-  process.stdout.write = ((chunk: string) => ((out += chunk), true)) as typeof process.stdout.write;
-  try {
-    await factoryCommand(root, ['automerge']);
-  } finally {
-    process.stdout.write = write;
-  }
-  report = JSON.parse(out);
+  } | null;
   assert.equal(report!.enabled, false);
   // When the first one merged, no docs pull request had merged yet.
   const first = report!.merged.find((row) => row.job === 'clean')!;

@@ -22,6 +22,7 @@ import {
   readdirSync,
   realpathSync,
   statSync,
+  writeFileSync,
   writeSync,
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -51,7 +52,7 @@ import {
 import { hasReview } from './review.ts';
 import { evaluatePolicy } from './policy.ts';
 import { parseCommand } from './cli.ts';
-import { readTask, taskWorkspace } from './tasks.ts';
+import { planIntact, readTask, taskWorkspace } from './tasks.ts';
 import { assignment, providers, workspaceRoot } from './flow-config.ts';
 import { packageDigest } from './package.ts';
 import { claimsDone, completionStatus } from './status.ts';
@@ -116,6 +117,15 @@ function runnerCall(action: Action, root: string) {
   } catch {
     return null;
   }
+}
+
+// A runner or installed halvard command followed by factory, in any segment of the command.
+function factoryCall(command: string) {
+  const parts = commands(command);
+  if (!parts) return /halvard(?:\.ts)?['"]?\s+factory\b/.test(command);
+  return parts.some((words) =>
+    words.some((word, i) => /(?:^|\/)halvard(?:\.ts)?$/.test(word) && words[i + 1] === 'factory'),
+  );
 }
 
 function isGate(call: ParsedCommand | null, key: string) {
@@ -202,7 +212,7 @@ async function extensions(project: Project) {
 
 // Edits that could rewrite the agent's own permissions, Git internals or the checks
 // behind the done proof still ask.
-function protectedPatterns(project: Project) {
+export function protectedPatterns(project: Project) {
   const { root, config } = project;
   const patterns = [
     CONFIG,
@@ -268,13 +278,24 @@ export async function approveFromTerminal(cwd: string, key: string, id: string) 
   return message;
 }
 
+// HALVARD_READONLY is set by the factory runner for a plan run in any harness.
 function readonlyMode(payload: HookPayload) {
   return (
     payload.permission_mode === 'plan' ||
     process.env.HALVARD_REVIEW === '1' ||
-    process.env.PI_REVIEW === '1'
+    process.env.PI_REVIEW === '1' ||
+    process.env.HALVARD_READONLY === '1'
   );
 }
+
+// A factory run has nobody to answer an approval, so every ask becomes a denial.
+export const unattended = () => process.env.HALVARD_UNATTENDED === '1';
+// Factory runs may not edit files or redirect shell output outside their worktree and task
+// workspace, where the main checkout, the shared Git directory and the factory's job files
+// lie. Other shell commands on a feature branch stay unclassified, as in every run.
+const factoryRun = () => unattended() || process.env.HALVARD_READONLY === '1';
+const UNATTENDED =
+  'This is an unattended factory run: nobody can approve it, and the factory runner commits, pushes and opens the pull request itself. Do not retry; finish the task and report.';
 
 export async function handle(harness: string | undefined, raw: unknown): Promise<HookResult> {
   if (!harness || !(HARNESSES as readonly string[]).includes(harness)) {
@@ -309,6 +330,7 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
     };
   }
   if (event === 'UserPromptSubmit') {
+    if (unattended()) return { context: `Approval refused. ${UNATTENDED}` };
     const message = await approve(root, key, (approval as RegExpMatchArray)[1]!, deadline);
     return { context: message };
   }
@@ -316,7 +338,15 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
     throw new Error(`unsupported workflow event: ${event}`);
   }
   const action = normalize(project, payload);
-  if (action.kind === 'outside') return {};
+  if (action.kind === 'outside') {
+    return factoryRun() && event === 'PreToolUse'
+      ? {
+          decision: 'deny',
+          reason:
+            'A factory run writes only inside its worktree and task workspace; this target is outside it.',
+        }
+      : {};
+  }
   // Each team file has one writer, named by its prefix; everyone may read it.
   if (action.kind === 'workspace') {
     const foreign =
@@ -366,6 +396,13 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
       reason: 'Only the user approves workflow requests. Ask the user to run the approve command.',
     };
   }
+  // The factory runner approves plans, runs reviews and ships; an agent never drives it.
+  if (action.kind === 'shell' && factoryCall(action.command)) {
+    return {
+      decision: 'deny',
+      reason: 'Factory commands run only from your own terminal, never from an agent session.',
+    };
+  }
 
   if (action.kind === 'shell' && !gate && strandedGate(action.command)) {
     return {
@@ -400,6 +437,13 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
       }
     }
     // A shell write outside the project passes like an outside file edit.
+    if (kind === 'outside' && factoryRun()) {
+      return {
+        decision: 'deny',
+        reason:
+          'A factory run writes only inside its worktree and task workspace; this target is outside it.',
+      };
+    }
     const read = kind === 'read' || kind === 'outside';
     const branch = currentBranch(root);
     const shellParts = action.kind === 'shell' ? commands(action.command) : null;
@@ -436,6 +480,13 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
         decision: 'deny',
         reason: `Run the full configured gate on this tree first: ${gateCommand(key)}`,
       };
+    }
+    if (
+      done &&
+      action.kind === 'files' &&
+      action.files.some((file) => !planStands(project, file.path))
+    ) {
+      return { decision: 'deny', reason: PLAN_CHANGED };
     }
     if (done && config.workflow.requireReview && action.kind === 'files') {
       if (action.files.length !== 1) {
@@ -503,6 +554,7 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
       state.pending?.id !== request ||
       Date.now() - state.pending.at > 600000
     ) {
+      if (unattended()) return { decision: 'deny', reason: `${reason} ${UNATTENDED}` };
       state.pending = { id: request, tree: requestTree, at: Date.now() };
       return { decision: 'ask', reason, request, session: key };
     }
@@ -512,6 +564,54 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
     state.consumed = toolCall ? { id: request, call: toolCall } : null;
     return {};
   });
+}
+
+const PLAN_CHANGED =
+  'The Approved plan section changed after approval, so the approval no longer holds. Restore it, or ask the user for a new approval.';
+
+// A hand-written task without workflow metadata has no recorded approval to protect.
+function planStands(project: Project, file: string) {
+  try {
+    return planIntact(readTask(project, file));
+  } catch {
+    return true;
+  }
+}
+
+// The completion checks the hook applies to a done edit, for a runner that marks the task
+// done itself: the session's gate receipt and the independent review cover this tree. The
+// task file is agent-editable, so a runner passes the plan digest it holds itself, or null
+// for a task without an approved plan; the hook can only compare the file with itself.
+export async function completeTask(
+  cwd: string,
+  path: string,
+  gateSession: string,
+  expected?: { plan: string | null },
+) {
+  const project = loadProject(cwd);
+  const { root, config } = project;
+  const task = readTask(project, path);
+  if (currentBranch(root) !== task.metadata.branch) {
+    throw new Error('task belongs to another branch');
+  }
+  if (!planIntact(task)) throw new Error(PLAN_CHANGED);
+  if (expected && (task.metadata.plan?.digest ?? null) !== expected.plan) {
+    throw new Error(PLAN_CHANGED);
+  }
+  const status = completionStatus(config.doneMarker);
+  const line = task.content.match(/^\*\*Status:\*\*[^\n]*$/m);
+  if (!line) throw new Error('task has no **Status:** line');
+  if (line[0].trimEnd() === status) throw new Error('task is already done');
+  const after = task.content.replace(/^\*\*Status:\*\*[^\n]*$/m, () => status);
+  const tree = fingerprint(root);
+  const gate = await withState(root, gateSession, (state) => state.pass);
+  if (gate?.tree !== tree) throw new Error('run the full configured gate on this tree first');
+  if (config.workflow.requireReview && !(await hasReview(project, task.file, tree))) {
+    throw new Error('get a passing independent review on this tree before marking done');
+  }
+  writeFileSync(resolve(root, task.file), after);
+  // The tree the runner commits: the reviewed tree plus the status line.
+  return { task: task.file, tree, gate, final: fingerprint(root) };
 }
 
 const GATE_TIMEOUT = 20 * 60 * 1000;

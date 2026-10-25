@@ -11,7 +11,12 @@ const commandSpecs: Record<string, { count: number; options?: string[]; required
   'setup-apply': { count: 2 },
   bootstrap: { count: 1 },
   'bootstrap-apply': { count: 2 },
-  'task-start': { count: 2, options: ['author', 'fix', 'small'], required: ['author'] },
+  'task-start': {
+    count: 2,
+    options: ['author', 'fix', 'small', 'brief', 'base', 'plan', 'approved-by'],
+    required: ['author'],
+  },
+  'task-done': { count: 1, options: ['gate-session', 'plan'], required: ['gate-session'] },
   'task-resume': { count: 1 },
   'task-handoff': { count: 1, options: ['author'], required: ['author'] },
   review: {

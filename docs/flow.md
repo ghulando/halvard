@@ -1,6 +1,6 @@
 # Flow
 
-How to use Halvard, from install to merge. VS Code draws the diagram in the Markdown preview with the Markdown Preview Mermaid Support extension; GitHub draws it as is.
+How to use Halvard, from install to merge, by hand or through the [factory](#factory). VS Code draws the diagrams in the Markdown preview with the Markdown Preview Mermaid Support extension; GitHub draws them as is.
 
 ```mermaid
 flowchart TD
@@ -62,3 +62,43 @@ flowchart TD
 ```
 
 The empty first commit matters: in a repository without commits, `setup` proposes the current branch as base.
+
+## Factory
+
+Factory mode runs the same flow without you at the keyboard: a runner on your machine or a server drives a headless harness, runs the gate and the review itself, and ships a pull request. You stay at three points: approving plans, merging, and deciding parked jobs. See [Factory](factory.md) for setup and every command.
+
+```mermaid
+flowchart TD
+    intake["Someone with write access labels an issue factory, or you run factory run or factory plan"] --> small{"Labeled factory:small?"}
+    small -- no --> planrun["Read-only plan run; the plan goes on the issue"]
+    planrun --> approve{"You label factory:approved?"}
+    approve -- no --> waiting["Job waits; factory:stop parks it"]
+    approve -- yes --> checkout
+    small -- yes --> checkout["Fresh worktree, or a clone and containers, on a task branch; setup runs"]
+
+    checkout --> tests["Optional: a second harness writes frozen acceptance tests"]
+    tests --> build["Headless build; every guard ask is a denial"]
+    build --> checks{"Git config, guarded paths, frozen tests and scope unchanged?"}
+    checks -- no --> parked
+    checks -- yes --> gate{"Runner's gate passes?"}
+    gate -- "no, fix pass left" --> build
+    gate -- "no, none left" --> parked
+    gate -- yes --> holdout{"Holdout checks pass?"}
+    holdout -- no --> parked
+    holdout -- yes --> review{"Cross-harness review passes?"}
+    review -- "blocked, fix pass left" --> build
+    review -- "blocked in round 2" --> parked
+    review -- yes --> ship["task-done, commit of the reviewed tree, push, draft pull request with evidence"]
+
+    ship --> automerge{"Auto-merge on, and the pull request meets every rule?"}
+    automerge -- yes --> merged["Runner merges at the factory commit"]
+    automerge -- no --> human["You review and merge"]
+
+    parked["Job parks with a reason on the issue"] --> decide{"You decide"}
+    decide -- "factory:retry or rework --note" --> checkout
+    decide -- "drop it" --> closed["Remove the job"]
+
+    merged -.-> outcomes["Outcomes feed the human-edit rate per class"]
+    human -.-> outcomes
+    outcomes -.-> retro["Periodic retro job: recurring findings become a guidance change, merged by you"]
+```

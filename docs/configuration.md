@@ -23,6 +23,7 @@ With no configuration, the hooks protect `main` and `master` and find skills in 
 | `extensions` | Repository JavaScript modules exporting `pre`, `post` or both. |
 | `stack` | Written by `bootstrap-apply`: the stack record name, the stacks commit, whether the record differed from it, and the stack gate that `setup` proposes while no gate is set. See [Stack records](stacks.md). |
 | `team` | The Herdr team, see [Team](#team). |
+| `factory` | Factory mode: author, reviewer order, setup, budgets and limits. See [Factory](factory.md). |
 | `workflow` | Task, branch and review preferences. |
 
 An unknown key, an invalid value or unreadable state makes the guard deny rather than guess. In patterns, `*` matches within one path segment and `**` across segments. File-tool edits to Git metadata, workflow and harness configuration, and the configured gate, review and extension files ask you first.

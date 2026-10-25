@@ -11,7 +11,8 @@ Every box names its type and technology, and every arrow says what it does and h
 | Dark blue box | Person |
 | Blue box | Halvard, or one of its containers |
 | Light blue box | A component inside a Halvard container |
-| Grey box | A system or store outside Halvard |
+| Grey box | A system, store or process outside Halvard |
+| Cylinder | A data store: files on disk |
 | Dashed frame | The boundary of a system or container |
 | Solid arrow | A one-way call, read or write, labelled with its purpose and technology |
 
@@ -37,7 +38,7 @@ flowchart LR
     dev -- "Gives tasks and approvals to<br/>[terminal, chat]" --> harness
     dev -- "Runs commands such as gate, approve and factory<br/>[CLI]" --> halvard
     maint -- "Labels issues and merges pull requests on<br/>[web, gh]" --> github
-    harness -- "Calls on every session start, prompt and tool use<br/>[hook command, JSON on stdin and stdout]" --> halvard
+    harness -- "Calls on every session start, prompt and tool use<br/>[hook command with JSON on stdin and stdout; in process for Pi]" --> halvard
     harness -- "Sends prompts to<br/>[HTTPS]" --> models
     halvard -- "Reads, fingerprints, commits and pushes<br/>[git CLI]" --> repo
     halvard -- "Starts for plans, builds and reviews<br/>[CLI processes]" --> headless
@@ -71,12 +72,12 @@ flowchart TB
     reviewers["<b>Reviewer CLIs</b><br/>[CLI processes]<br/>claude, codex, grok, cursor-agent, ollama or pi"]
 
     subgraph halvard["Halvard [Software System]"]
-        skills[("<b>Skills</b><br/>[Container: Markdown files]<br/>Instructions the harness loads: plan, implement, test, review")]
+        skills[("<b>Skills</b><br/>[Container: Markdown files]<br/>Instructions the harness loads: spec, design, implement, test, review")]
         hook["<b>Hook guard</b><br/>[Container: Node.js process]<br/>Decides allow, ask or deny for each tool call and injects startup context"]
         piext["<b>Pi extension</b><br/>[Container: Node.js module in Pi]<br/>Same guard, called in process, plus plan mode"]
         cli["<b>halvard CLI</b><br/>[Container: Node.js process]<br/>task-start and task-done, gate, review, approve, setup, install"]
         state[("<b>Workflow state</b><br/>[Container: private files in TMPDIR]<br/>Gate receipts, approvals, review records, locks")]
-        workspace[("<b>Task workspace</b><br/>[Container: files in ~/.halvard]<br/>Review reports, team files, task markers")]
+        workspace[("<b>Task workspace</b><br/>[Container: files in ~/.halvard]<br/>Gate logs, review reports, team files, task markers")]
     end
 
     dev -- "Gives tasks and approvals to<br/>[terminal, chat]" --> harness
@@ -85,8 +86,8 @@ flowchart TB
     harness -- "Starts once per hook event<br/>[process, JSON on stdin and stdout]" --> hook
     pi -- "Calls on every event<br/>[in-process function call]" --> piext
     harness -- "Agent runs task-start, gate, review<br/>[shell command]" --> cli
-    hook -- "Reads<br/>[files]" --> state
-    piext -- "Reads<br/>[files]" --> state
+    hook -- "Reads receipts, records approvals<br/>[files]" --> state
+    piext -- "Reads receipts, records approvals<br/>[files]" --> state
     cli -- "Writes<br/>[files]" --> state
     cli -- "Writes<br/>[files]" --> workspace
     cli -- "Runs reviews<br/>[process]" --> reviewers
@@ -102,40 +103,44 @@ flowchart TB
     style halvard fill:none,stroke:#0b4884,stroke-dasharray:6 4
 ```
 
-_Key: see [Key](#key)._ The hook guard only decides; the agent runs the gate and the review itself with the CLI, and the guard reads their records when the agent marks the task done.
+_Key: see [Key](#key)._ The hook guard decides each call and records approvals and pending asks in workflow state. The agent runs the gate and the review itself with the CLI, and the guard checks their records when the agent marks the task done.
 
 ### Factory run
 
 ```mermaid
 flowchart TB
     dev["<b>Developer</b><br/>[Person]"]
-    headless["<b>Headless agents</b><br/>[CLI processes]<br/>Plan and build runs with HALVARD_UNATTENDED=1"]
     repo["<b>Target repository</b><br/>[Git clone or worktree]"]
     github["<b>GitHub</b><br/>[Software System]"]
     docker["<b>Docker Engine</b><br/>[Software System]"]
+    reviewers["<b>Reviewer CLIs</b><br/>[CLI processes]"]
+    headless["<b>Headless agents</b><br/>[CLI processes]<br/>Plan and build runs with HALVARD_UNATTENDED=1"]
 
     subgraph halvard["Halvard [Software System]"]
         factory["<b>Factory runner</b><br/>[Container: Node.js process]<br/>halvard factory: plans, builds, checks and ships jobs; serve polls GitHub"]
         jobs[("<b>Factory store</b><br/>[Container: files in ~/.halvard-factory]<br/>Job files, events, evidence, outcomes, board")]
         cli["<b>halvard CLI</b><br/>[Container: Node.js process]<br/>gate, review, task-done for the runner"]
         hook["<b>Hook guard</b><br/>[Container: Node.js process]<br/>Turns every ask into a denial"]
+        state[("<b>Workflow state</b><br/>[Container: files]<br/>The job's gate receipts and review records")]
     end
 
     dev -- "Runs factory commands<br/>[shell]" --> factory
-    factory -- "Jobs, events<br/>[JSON files]" --> jobs
-    factory -- "Starts<br/>[process]" --> headless
-    headless -- "Hook calls<br/>[JSON on stdin]" --> hook
-    factory -- "gate, review, task-done<br/>[child process]" --> cli
-    factory -- "Clones, commits, pushes<br/>[git]" --> repo
-    factory -- "Issues, pull requests<br/>[gh, HTTPS]" --> github
-    factory -- "Steps in containers<br/>[docker run]" --> docker
+    factory -- "Reads and writes<br/>[JSON files]" --> jobs
+    headless -- "Calls on every tool use<br/>[JSON on stdin]" --> hook
+    factory -- "Runs gate, review, task-done<br/>[child process]" --> cli
+    cli -- "Writes receipts and review records<br/>[files]" --> state
+    cli -- "Runs reviews<br/>[process]" --> reviewers
+    factory -- "Clones and pushes<br/>[git]" --> repo
+    factory -- "Reads issues, opens PRs<br/>[gh]" --> github
+    factory -- "Runs steps in containers<br/>[docker run]" --> docker
+    factory -- "Starts runs<br/>[process]" --> headless
 
     classDef person fill:#08427b,stroke:#052e56,color:#ffffff
     classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
     classDef external fill:#999999,stroke:#6b6b6b,color:#ffffff
     class dev person
-    class factory,jobs,cli,hook container
-    class headless,repo,github,docker external
+    class factory,jobs,cli,hook,state container
+    class headless,repo,github,docker,reviewers external
     style halvard fill:none,stroke:#0b4884,stroke-dasharray:6 4
 ```
 
@@ -178,7 +183,8 @@ flowchart TB
     runtime -- "Checks done markers" --> tasks
     agentcmd -- "gate<br/>[CLI]" --> gate
     agentcmd -- "review<br/>[CLI]" --> review
-    agentcmd -- "task-start, task-done<br/>[CLI]" --> tasks
+    agentcmd -- "task-start<br/>[CLI]" --> tasks
+    agentcmd -- "task-done<br/>[CLI]" --> runtime
     gate -- "Writes the receipt" --> statec
     review -- "Writes the record" --> statec
     review -- "Runs<br/>[process]" --> reviewers
@@ -186,13 +192,15 @@ flowchart TB
     statec -- "Fingerprints<br/>[git ls-files, file hashes]" --> repo
 
     classDef component fill:#85bbf0,stroke:#5d82a8,color:#000000
+    classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
     classDef external fill:#999999,stroke:#6b6b6b,color:#ffffff
     class adapter,runtime,shell,tools,policy,statec,config,tasks,gate,review component
-    class harness,agentcmd,state,repo,reviewers external
+    class state container
+    class harness,agentcmd,repo,reviewers external
     style engine fill:none,stroke:#2e6295,stroke-dasharray:6 4
 ```
 
-_Key: see [Key](#key)._ Policy has no input or output of its own; the runtime gathers the facts and acts on the decision. A done edit is allowed only when the gate receipt and the review record match the current tree fingerprint.
+_Key: see [Key](#key)._ Policy has no input or output of its own; the runtime gathers the facts and acts on the decision. `task-done` runs the runtime's own completion checks, the same ones a done edit gets. A done edit is allowed only when the gate receipt and the review record match the current tree fingerprint.
 
 ### Factory runner
 
@@ -208,7 +216,7 @@ flowchart TB
 
     subgraph runner["Factory runner [Container]"]
         commands["<b>Job pipeline</b><br/>[Component: TypeScript]<br/>Commands, plan and build stages, checks, park, ship"]
-        serve["<b>Serve loop</b><br/>[Component: TypeScript]<br/>Polls labels, claims issues, runs up to 4 jobs, starts retros"]
+        serve["<b>Serve loop</b><br/>[Component: TypeScript]<br/>Polls labels, claims issues, runs up to concurrency jobs (1 to 4), starts retros"]
         driver["<b>Harness driver</b><br/>[Component: TypeScript]<br/>Headless command lines, scrubbed environment, timeouts, cost"]
         box["<b>Container box</b><br/>[Component: TypeScript]<br/>docker run flags, mounts, image version check"]
         store["<b>Job store</b><br/>[Component: TypeScript]<br/>Job folders, locks, events"]
@@ -218,8 +226,8 @@ flowchart TB
         board["<b>Board and metrics</b><br/>[Component: TypeScript]<br/>Static HTML board and numbers"]
     end
 
-    dev -- "factory plan, build, run, serve<br/>[CLI]" --> commands
-    dev -- "factory serve<br/>[CLI]" --> serve
+    dev -- "Runs factory commands<br/>[CLI]" --> commands
+    commands -- "Runs factory serve with" --> serve
     serve -- "Starts jobs in" --> commands
     serve -- "Merges and refreshes through" --> outcomes
     serve -- "Starts due retros from" --> retro
@@ -237,13 +245,18 @@ flowchart TB
     serve -- "Reads issues and label events<br/>[gh CLI]" --> github
     serve -- "Writes the board after each step with" --> board
     board -- "Reads events and outcomes<br/>[files]" --> jobs
+    outcomes -- "Reads events, writes outcome.json<br/>[files]" --> jobs
+    retro -- "Reads events<br/>[files]" --> jobs
+    commands -- "Reads briefs and plans<br/>[files]" --> jobs
 
     classDef person fill:#08427b,stroke:#052e56,color:#ffffff
     classDef component fill:#85bbf0,stroke:#5d82a8,color:#000000
     classDef external fill:#999999,stroke:#6b6b6b,color:#ffffff
     class dev person
+    classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
     class commands,serve,driver,box,store,ship,outcomes,retro,board component
-    class github,harness,cli,docker,jobs,repo external
+    class cli,jobs container
+    class github,harness,docker,repo external
     style runner fill:none,stroke:#2e6295,stroke-dasharray:6 4
 ```
 
@@ -274,22 +287,24 @@ sequenceDiagram
     S->>GH: Post the plan on the issue [gh]
     W->>GH: Label factory:approved
     S->>GH: Read the label event and the labeller's permission [gh]
-    S->>A: Build run in a fresh worktree or container [HALVARD_UNATTENDED=1]
+    S->>A: Build run in a fresh worktree, or a clone with the run in a container [HALVARD_UNATTENDED=1]
     A->>G: Every tool call [hook]
     G-->>A: Asks become denials
+    S->>S: Tamper and scope checks
     S->>C: halvard gate [child process or container]
     C-->>S: Receipt for the tree
-    S->>S: Holdout checks, tamper and scope checks
+    S->>S: Holdout checks
     S->>C: halvard review
     C->>R: Review the snapshot, read-only [process]
     R-->>C: Verdict
+    S->>S: Tamper checks again
     S->>C: halvard task-done
-    S->>S: Commit the reviewed tree [git]
+    S->>S: Scope, Git directory and fingerprint checks, then commit the reviewed tree [git]
     S->>GH: Push and open a draft pull request with evidence [git, gh]
-    S->>J: Record committed, pull request and outcome events
+    S->>J: Record the committed and pull request events
 ```
 
-_Key: solid arrows are calls, dashed arrows are replies; the bracket names the technology._ A failed gate or a blocked review sends the job back to step 10 while fix passes remain; otherwise the job parks and the runner comments on the issue.
+_Key: solid arrows are calls, dashed arrows are replies; the bracket names the technology._ Setup steps and the optional acceptance-test writer run between steps 9 and 10. A failed gate or a blocked review sends the job back to step 10 while fix passes remain; otherwise the job parks and the runner comments on the issue. Outcomes of the pull request are fetched later, by `factory serve` or `factory automerge`.
 
 ## 5. Deployment
 
@@ -312,8 +327,8 @@ flowchart TB
         d2[("<b>Factory store and clones</b><br/>[files under ~/.halvard-factory]")]
         subgraph engine["Docker Engine"]
             subgraph net["Network: none, or internal with an egress proxy"]
-                a2["<b>Agent container</b><br/>[harness CLI with Halvard's hooks, model keys only]"]
-                r2["<b>Runner-step container</b><br/>[gate, review, task-done]"]
+                a2["<b>Agent container</b><br/>[harness CLI with Halvard's hooks]"]
+                r2["<b>Runner-step containers</b><br/>[setup, gate, review, task-done]"]
                 o2["<b>Holdout container</b><br/>[no network, read-only checkout]"]
             end
         end
@@ -322,19 +337,21 @@ flowchart TB
     gh["<b>GitHub</b><br/>[Software System]"]
     api["<b>Model APIs</b><br/>[Software System]"]
 
-    h1 -- "Hook calls" --> g1
-    h1 -- "Shell commands" --> c1
-    g1 -- "Files" --> d1
-    c1 -- "Files" --> d1
-    f1 -- "Files" --> d1
+    h1 -- "Calls per hook<br/>[JSON on stdin]" --> g1
+    h1 -- "Agent runs<br/>[shell command]" --> c1
+    g1 -- "Reads and writes<br/>[files]" --> d1
+    c1 -- "Reads and writes<br/>[files]" --> d1
+    f1 -- "Reads and writes<br/>[files]" --> d1
+    f1 -- "Starts headless runs<br/>[process]" --> h1
     f1 -- "gh, git over HTTPS" --> gh
     f2 -- "gh, git over HTTPS" --> gh
     f2 -- "docker run" --> a2
     f2 -- "docker run" --> r2
     f2 -- "docker run" --> o2
-    f2 -- "Files" --> d2
+    f2 -- "Reads and writes<br/>[files]" --> d2
     h1 -- "HTTPS" --> api
     a2 -- "HTTPS through the proxy, if allowed" --> api
+    r2 -- "Reviewer and gate traffic, if allowed<br/>[HTTPS]" --> api
 
     classDef container fill:#438dd5,stroke:#2e6295,color:#ffffff
     classDef external fill:#999999,stroke:#6b6b6b,color:#ffffff
@@ -347,7 +364,7 @@ flowchart TB
     style net fill:none,stroke:#6b6b6b,stroke-dasharray:3 3
 ```
 
-_Key: dashed frames are deployment nodes; boxes inside them are the containers deployed there._ On the server only the runner holds GitHub credentials; containers get the clone, read-only `.git`, the model keys you list and nothing else. [Factory](factory.md#containers) has the image, mounts and network setup.
+_Key: dashed frames are deployment nodes; boxes inside them are the containers deployed there._ On the server only the runner holds GitHub and SSH credentials. Every container gets the clone with a read-only `.git`, the extra mounts you configure and only the variables you list, which are the model keys by default. Agent containers also get the task workspace and their prompt folder; runner-step containers also get the job's receipt folder and, read-only, your personal settings. [Factory](factory.md#containers) lists every mount.
 
 ## Where things live
 
@@ -368,7 +385,7 @@ _Key: dashed frames are deployment nodes; boxes inside them are the containers d
 | Policy | `core/policy.ts` |
 | State and fingerprint | `core/state.ts` |
 | Configuration | `core/project.ts`, `core/flow-config.ts`, `core/types.ts` |
-| Tasks | `core/tasks.ts` |
+| Tasks | `core/tasks.ts`; `task-done` runs `completeTask` in `core/runtime.ts` |
 | Gate | `runGate` in `core/runtime.ts` |
 | Review runner | `core/review.ts` |
 | Job pipeline | `core/factory.ts` |
@@ -376,7 +393,7 @@ _Key: dashed frames are deployment nodes; boxes inside them are the containers d
 | Harness driver | `core/factory-harness.ts` |
 | Container box | `core/factory-container.ts` |
 | Job store | `core/factory-store.ts` |
-| Ship and evidence | `core/factory-ship.ts` |
+| Ship and evidence | `core/factory-ship.ts` for the Git and `gh` helpers, changed files, risk and the pull request body; `ship()` in `core/factory.ts` uses them to commit, push and open the pull request |
 | Outcomes and auto-merge | `core/factory-outcomes.ts` |
 | Retro | `core/factory-retro.ts` |
 | Board and metrics | `core/factory-board.ts` |

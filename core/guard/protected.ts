@@ -2,6 +2,7 @@ import type { Project } from '../types.ts';
 import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { CONFIG, gateSteps, inside, projectPath } from '../project.ts';
+import { drivers } from '../harnesses/index.ts';
 
 // Edits that could rewrite the agent's own permissions, Git internals or the checks
 // behind the done proof still ask.
@@ -14,11 +15,7 @@ export function protectedPatterns(project: Project) {
     '.git/**',
     '**/.git',
     '**/.git/**',
-    '.pi/**',
-    '.claude/**',
-    '.codex/**',
-    '.grok/**',
-    '.cursor/**',
+    ...drivers.flatMap(({ settingsDir }) => (settingsDir ? [`${settingsDir}/**`] : [])),
     '.agents/plugins/**',
     ...config.extensions,
   ];

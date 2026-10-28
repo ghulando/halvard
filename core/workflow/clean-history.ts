@@ -14,6 +14,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { createInterface } from 'node:readline';
 import { personalRoot, workspaceRoot } from '../config/paths.ts';
 import { privateDirectory } from '../state.ts';
+import { driver } from '../harnesses/index.ts';
 
 // History cleanup and retro read transcript formats known only for these hosts.
 export type HistoryHarness = 'pi' | 'claude' | 'codex';
@@ -152,11 +153,14 @@ export function historyHarnesses(value: string): HistoryHarness[] {
   return harnessNames.filter((name) => selected.includes(name));
 }
 
+// Each tool's driver knows where it keeps its history.
+const history = (name: HistoryHarness) => driver(name)!.history!;
+
 function roots(): HistoryPlan['roots'] {
   return {
-    claude: resolve(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')),
-    pi: resolve(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi/agent')),
-    codex: resolve(process.env.CODEX_HOME || join(homedir(), '.codex')),
+    claude: history('claude').root(),
+    pi: history('pi').root(),
+    codex: history('codex').root(),
     workflow: workspaceRoot(),
   };
 }
@@ -802,13 +806,9 @@ export function transcriptFiles(harnesses: HistoryHarness[]) {
     if (stat(root[harness])?.isSymbolicLink()) {
       throw new Error(`History root is a symlink: ${root[harness]}`);
     }
-    const transcripts = (
-      harness === 'claude'
-        ? ['projects']
-        : harness === 'pi'
-          ? ['sessions']
-          : ['sessions', 'archived_sessions']
-    ).flatMap((part) => files(join(root[harness], part)));
+    const transcripts = history(harness).transcripts.flatMap((part) =>
+      files(join(root[harness], part)),
+    );
     const sources = [
       ...transcripts,
       ...['history.jsonl']

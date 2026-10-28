@@ -1,19 +1,22 @@
 import type { FlowConfig } from '../types.ts';
 import { HARNESSES } from '../types.ts';
+import { driver, drivers } from '../harnesses/index.ts';
 
 export const authors: string[] = [...HARNESSES];
 export const AUTHOR_ERROR = `author must be ${authors.join(', ')}`;
 
 // Headless review providers: each runs a CLI on this machine.
-export const providers = ['claude', 'codex', 'grok', 'cursor', 'ollama'];
+export const providers = drivers.flatMap(({ name, review }) => (review ? [name] : []));
 
-export const reviewerChoices: Record<string, string[]> = {
-  pi: ['claude', 'codex', 'grok', 'cursor'],
-  codex: ['ollama', 'claude', 'grok', 'cursor'],
-  claude: ['ollama', 'codex', 'grok', 'cursor'],
-  grok: ['ollama', 'claude', 'codex', 'cursor'],
-  cursor: ['ollama', 'claude', 'codex', 'grok'],
-};
+// Each author may be reviewed by every other provider it is independent of, Ollama first.
+export const reviewerChoices: Record<string, string[]> = Object.fromEntries(
+  authors.map((author) => [
+    author,
+    [...providers]
+      .sort((a, b) => Number(b === 'ollama') - Number(a === 'ollama'))
+      .filter((name) => name !== author && !driver(name)!.review!.notFor?.includes(author)),
+  ]),
+);
 
 export const assignment = (workflow: FlowConfig, author: string) =>
   Object.hasOwn(workflow.reviewers, author) && workflow.reviewers[author]!.reviewer !== undefined

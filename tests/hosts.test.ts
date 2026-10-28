@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { HARNESSES } from '../core/types.ts';
 import { providers } from '../core/config/reviewers.ts';
+import { historyHarnesses } from '../core/workflow/clean-history.ts';
 import { driver, drivers, hostHarness, toHookPayload } from '../core/harnesses/index.ts';
 import { canonicalTool } from '../core/harnesses/tool-input.ts';
 
@@ -314,5 +315,8 @@ test('every harness and review provider has a driver', () => {
     assert.ok(driver(name)?.hooks && driver(name)?.agent, `${name} has no hook or agent driver`);
   }
   for (const name of providers) assert.ok(driver(name)?.review, `${name} has no review driver`);
+  for (const name of historyHarnesses('all')) {
+    assert.ok(driver(name)?.history, `${name} has no history driver`);
+  }
   assert.equal(new Set(drivers.map((entry) => entry.name)).size, drivers.length);
 });

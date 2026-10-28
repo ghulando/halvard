@@ -9,18 +9,15 @@ import { HARNESSES } from '../types.ts';
 import { absolute, containerConfig } from './container.ts';
 import { isHarness } from './team.ts';
 import { providers } from './reviewers.ts';
+import { drivers } from '../harnesses/index.ts';
 
 // Paths whose change always makes a factory PR high risk. Repositories add their own.
 const RISK_PATHS = [
   '.github/**',
   '.gitlab-ci.yml',
   '.halvard.json',
-  '.claude/**',
-  '.codex/**',
-  '.grok/**',
-  '.cursor/**',
+  ...drivers.flatMap(({ settingsDir }) => (settingsDir ? [`${settingsDir}/**`] : [])),
   '.agents/**',
-  '.pi/**',
   // Guidance every later agent and reviewer reads.
   'AGENTS.md',
   'CLAUDE.md',

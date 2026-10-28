@@ -67,6 +67,7 @@ function cursorOutput(event: string | undefined, result: HookResult): NativeHook
 
 export const cursor: Driver = {
   name: 'cursor',
+  settingsDir: '.cursor',
   detect: (raw) =>
     typeof raw.cursor_version === 'string' ||
     (typeof raw.conversation_id === 'string' && Array.isArray(raw.workspace_roots)),

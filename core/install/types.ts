@@ -51,27 +51,6 @@ export interface PackageMetadata {
   description: string;
 }
 
-export interface HarnessSettings {
-  permissions?: unknown;
-  hooks?: unknown;
-  packages?: string[];
-  extraKnownMarketplaces?: Record<string, { source: { source: string; path: string } }>;
-  enabledPlugins?: Record<string, boolean>;
-}
-
-export interface MarketplacePlugin {
-  name: string;
-  source: { source: string; path: string };
-  interface?: { displayName: string; shortDescription: string };
-  policy?: { installation: string; authentication: string };
-  category?: string;
-}
-
-export interface Marketplace {
-  name: string;
-  plugins: MarketplacePlugin[];
-}
-
 export interface PackedArchive {
   filename: string;
   files: { path: string; size: number; mode: number }[];

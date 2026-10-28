@@ -5,6 +5,8 @@ import type { Driver } from './types.ts';
 export const ollama: Driver = {
   name: 'ollama',
   review: {
+    // Ollama can review through Pi, so it never reviews a Pi author's work.
+    notFor: ['pi'],
     command: ({ settings, input }) => {
       if (!settings.model) throw new Error('unsupported or unconfigured reviewer');
       if (settings.transport === 'pi') {

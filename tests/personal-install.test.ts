@@ -1,4 +1,5 @@
-import type { HarnessSettings, PackageMetadata } from '../core/install/types.ts';
+import type { HarnessSettings } from '../core/harnesses/types.ts';
+import type { PackageMetadata } from '../core/install/types.ts';
 import './environment.ts';
 import assert from 'node:assert/strict';
 import {
@@ -218,8 +219,8 @@ test('personal install names the workspace settings and the session restart with
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const plan = personalInstallPlan(home, join(home, '.config/halvard'));
   assert.equal(plan.workspace.path, process.env.HALVARD_WORKSPACE);
-  assert.match(plan.workspace.claude, /permissions\.additionalDirectories/);
-  assert.match(plan.workspace.codex, /\[sandbox_workspace_write\]/);
+  assert.match(plan.workspace.claude!, /permissions\.additionalDirectories/);
+  assert.match(plan.workspace.codex!, /\[sandbox_workspace_write\]/);
   assert.match(plan.instruction, /restart every open Claude Code and Codex session/);
   const settings = JSON.parse(
     plan.writes.find((w) => w.path.endsWith('.claude/settings.json'))!.content,

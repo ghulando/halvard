@@ -161,7 +161,7 @@ flowchart TB
     reviewers["<b>Reviewer CLIs</b><br/>[CLI processes]"]
 
     subgraph engine["Hook guard, Pi extension and halvard CLI [Containers]"]
-        adapter["<b>Harness drivers</b><br/>[Component: TypeScript]<br/>One per tool: hook payload and output format, headless agent and review commands and results"]
+        adapter["<b>Harness drivers</b><br/>[Component: TypeScript]<br/>One per tool: hook format, headless agent and review commands, install steps, history and transcripts"]
         runtime["<b>Runtime</b><br/>[Component: TypeScript]<br/>Handles each event: startup context, approvals, done checks, extensions"]
         shell["<b>Shell classifier</b><br/>[Component: TypeScript]<br/>Parses shell commands into reads, writes, Git and shipping operations"]
         tools["<b>Tool normalizer</b><br/>[Component: TypeScript]<br/>Turns edits and patches into the files and contents they produce"]

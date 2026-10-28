@@ -33,6 +33,7 @@ function grokPayload(raw: Raw): HookPayload | null {
 // Grok's headless mode reads the prompt from a file, not stdin.
 export const grok: Driver = {
   name: 'grok',
+  settingsDir: '.grok',
   // Grok also loads Claude hooks and ~/.cursor/hooks.json, so one tool call may reach
   // several Halvard entries; each one guards as Grok.
   detect: (_raw, env) => Boolean(env.GROK_HOOK_EVENT),

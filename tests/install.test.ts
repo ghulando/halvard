@@ -1,4 +1,4 @@
-import type { HarnessSettings } from '../core/install/types.ts';
+import type { HarnessSettings } from '../core/harnesses/types.ts';
 import './environment.ts';
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';

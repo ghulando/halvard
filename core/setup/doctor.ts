@@ -8,6 +8,7 @@ import { currentBranch, loadProject } from '../project.ts';
 import { packageStatus } from '../install/package.ts';
 import { pluginRoot } from '../shared/plugin.ts';
 import { stacksDirectory } from './bootstrap.ts';
+import { drivers } from '../harnesses/index.ts';
 
 export function doctor(cwd: string, author?: string) {
   if (author !== undefined && !authors.includes(author)) {
@@ -68,16 +69,12 @@ export function doctor(cwd: string, author?: string) {
   for (const path of paths) addPrefix(dirname(path), basename(path) + '.next-');
   const settings = [
     resolve(root, '.halvard.json'),
-    resolve(root, 'CLAUDE.md'),
-    resolve(root, '.pi/settings.json'),
-    resolve(root, '.claude/settings.json'),
-    resolve(root, '.codex/config.toml'),
-    resolve(root, '.agents/plugins/marketplace.json'),
     resolve(personalRoot(), 'personal.json'),
     resolve(personalRoot(), '.agents/plugins/marketplace.json'),
-    resolve(homedir(), '.pi/agent/settings.json'),
-    resolve(homedir(), '.claude/settings.json'),
-    resolve(homedir(), '.codex/config.toml'),
+    ...drivers.flatMap(({ install }) => [
+      ...(install?.projectFiles ?? []).map((path) => resolve(root, path)),
+      ...(install?.homeFiles ?? []).map((path) => resolve(homedir(), path)),
+    ]),
   ];
   for (const path of settings) addPrefix(dirname(path), `.${basename(path)}.workflow-`);
   for (const [directory, prefixes] of staging) {

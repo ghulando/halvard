@@ -3,7 +3,7 @@ import type {
   PackageMetadata,
   HarnessSettings,
   Marketplace,
-} from '../core/types.ts';
+} from '../core/install/types.ts';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, readdirSync, existsSync } from 'node:fs';

@@ -1,6 +1,7 @@
-import type { FactoryJob, HoldoutCheck, ReviewRecord } from '../types.ts';
+import type { FactoryJob } from './store.ts';
+import type { HoldoutCheck, ReviewRecord } from '../types.ts';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { eligibleReviewers, reviewerSettings } from '../flow-config.ts';
+import { eligibleReviewers, reviewerSettings } from '../config/reviewers.ts';
 import { reviewCommand } from '../workflow/review.ts';
 import { digest, fingerprint } from '../state.ts';
 import { runChild, scrubbedEnv } from './harness.ts';

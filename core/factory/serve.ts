@@ -1,4 +1,4 @@
-import type { FactoryJob } from '../types.ts';
+import type { FactoryJob } from './store.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { gh } from './ship.ts';

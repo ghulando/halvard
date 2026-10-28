@@ -1,5 +1,6 @@
 import type { TestContext } from 'node:test';
-import type { ProjectConfig, HarnessSettings, PackageMetadata } from '../core/types.ts';
+import type { ProjectConfig } from '../core/types.ts';
+import type { HarnessSettings, PackageMetadata } from '../core/install/types.ts';
 import './environment.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -21,12 +22,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
 import { loadProject, git } from '../core/project.ts';
-import {
-  eligibleReviewers,
-  flowConfig,
-  personalSettings,
-  reviewerChoices,
-} from '../core/flow-config.ts';
+import { eligibleReviewers, reviewerChoices } from '../core/config/reviewers.ts';
+import { flowConfig, personalSettings } from '../core/config/workflow.ts';
 import {
   startTask,
   resumeTask,

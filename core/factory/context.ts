@@ -1,7 +1,7 @@
 import type { FactoryConfig, Project } from '../types.ts';
 import { realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { personalRoot, workspaceRoot } from '../flow-config.ts';
+import { personalRoot, workspaceRoot } from '../config/paths.ts';
 import { loadProject } from '../project.ts';
 import { factoryHome } from './store.ts';
 

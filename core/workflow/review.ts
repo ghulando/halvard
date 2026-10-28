@@ -21,7 +21,7 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { assignment, reviewerChoices, reviewerSettings } from '../flow-config.ts';
+import { assignment, reviewerChoices, reviewerSettings } from '../config/reviewers.ts';
 import { skills } from '../context.ts';
 import { currentBranch, git, loadProject, matches, projectPath } from '../project.ts';
 import { readTask, taskWorkspace } from './tasks.ts';

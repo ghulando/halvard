@@ -1,4 +1,4 @@
-import type { FactoryJob } from '../types.ts';
+import type { FactoryJob } from './store.ts';
 import { randomUUID as uuid } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { checkImage } from './container.ts';

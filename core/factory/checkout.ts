@@ -1,4 +1,4 @@
-import type { FactoryJob } from '../types.ts';
+import type { FactoryJob } from './store.ts';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -10,7 +10,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
-import { personalRoot } from '../flow-config.ts';
+import { personalRoot } from '../config/paths.ts';
 import { loadProject, matches } from '../project.ts';
 import { protectedPatterns } from '../guard/protected.ts';
 import { digest } from '../state.ts';

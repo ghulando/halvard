@@ -1,4 +1,5 @@
-import type { FactoryJob, ReviewRecord } from '../types.ts';
+import type { FactoryJob } from './store.ts';
+import type { ReviewRecord } from '../types.ts';
 import { writeFileSync } from 'node:fs';
 import { completeTask } from '../workflow/complete.ts';
 import { fingerprint } from '../state.ts';

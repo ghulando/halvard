@@ -1,5 +1,6 @@
 import type { TestContext } from 'node:test';
-import type { ToolInput, HookPayload, ProjectConfig, HarnessSettings } from '../core/types.ts';
+import type { ToolInput, HookPayload, ProjectConfig } from '../core/types.ts';
+import type { HarnessSettings } from '../core/install/types.ts';
 import './environment.ts';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';

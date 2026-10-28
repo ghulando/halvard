@@ -1,4 +1,5 @@
-import type { AutoMergeConfig, FactoryJob } from '../types.ts';
+import type { AutoMergeConfig } from '../types.ts';
+import type { FactoryJob } from './store.ts';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { baseRef, exec, gh } from './ship.ts';
 import { jobEvents, jobFile, listJobs, recordEvent } from './store.ts';

@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { HARNESSES } from '../core/types.ts';
-import { providers } from '../core/flow-config.ts';
+import { providers } from '../core/config/reviewers.ts';
 import { driver, drivers, hostHarness, toHookPayload } from '../core/harnesses/index.ts';
 import { canonicalTool } from '../core/harnesses/tool-input.ts';
 

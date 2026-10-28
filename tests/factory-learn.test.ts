@@ -1,5 +1,5 @@
 import type { TestContext } from 'node:test';
-import type { FactoryJob } from '../core/types.ts';
+import type { FactoryJob } from '../core/factory/store.ts';
 import './environment.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -16,7 +16,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { factoryConfig } from '../core/flow-config.ts';
+import { factoryConfig } from '../core/config/factory.ts';
 import { factoryCommand } from '../core/factory/command.ts';
 import { sampled } from '../core/factory/checks.ts';
 import { metrics } from '../core/factory/board.ts';

@@ -39,6 +39,12 @@ const rules: { name: string; from: (file: string) => boolean; to: (target: strin
       to: (target) => !target.startsWith('core/shared/') && target !== 'core/types.ts',
     },
     {
+      // Settings validation is the bottom layer: everything reads it, it reads nothing.
+      name: 'core/config imports only core/config and core/types.ts',
+      from: (file) => file.startsWith('core/config/'),
+      to: (target) => !target.startsWith('core/config/') && target !== 'core/types.ts',
+    },
+    {
       // Each tool's driver knows only its own tool; the engine decides what to do with it.
       name: 'core/harnesses imports only core/harnesses, core/shared and core/types.ts',
       from: (file) => file.startsWith('core/harnesses/'),

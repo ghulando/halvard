@@ -1,4 +1,4 @@
-import type { FactoryJob } from '../types.ts';
+import type { FactoryJob } from './store.ts';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { planDigest } from '../workflow/tasks.ts';
 import { agentStatus } from './harness.ts';

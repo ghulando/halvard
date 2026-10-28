@@ -1,5 +1,6 @@
 import type { TestContext } from 'node:test';
-import type { FactoryConfig, FactoryJob } from '../core/types.ts';
+import type { FactoryConfig } from '../core/types.ts';
+import type { FactoryJob } from '../core/factory/store.ts';
 import './environment.ts';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
@@ -21,7 +22,7 @@ import { handle } from '../core/runtime.ts';
 import { completeTask } from '../core/workflow/complete.ts';
 import { runGate } from '../core/workflow/gate.ts';
 import { runReview } from '../core/workflow/review.ts';
-import { factoryConfig } from '../core/flow-config.ts';
+import { factoryConfig } from '../core/config/factory.ts';
 import { loadProject } from '../core/project.ts';
 import {
   approvedPlan,

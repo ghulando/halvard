@@ -1,4 +1,5 @@
-import type { FactoryConfig, FactoryJob } from '../types.ts';
+import type { FactoryConfig } from '../types.ts';
+import type { FactoryJob } from './store.ts';
 import { randomUUID as uuid } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';

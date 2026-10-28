@@ -15,7 +15,7 @@ import {
 import { basename, join, resolve } from 'node:path';
 import { currentBranch, gateSteps, loadProject } from '../project.ts';
 import { invalidate, privateDirectory, fingerprint, withState } from '../state.ts';
-import { workspaceRoot } from '../flow-config.ts';
+import { workspaceRoot } from '../config/paths.ts';
 import { readTask, taskWorkspace } from './tasks.ts';
 
 const GATE_TIMEOUT = 20 * 60 * 1000;

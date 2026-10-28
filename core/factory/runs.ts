@@ -1,4 +1,5 @@
-import type { FactoryJob, Harness } from '../types.ts';
+import type { FactoryJob } from './store.ts';
+import type { Harness } from '../types.ts';
 import { resolve } from 'node:path';
 import { pluginRoot } from '../shared/plugin.ts';
 import {

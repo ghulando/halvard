@@ -1,8 +1,9 @@
-import type { PackageMetadata } from '../types.ts';
+import type { PackageMetadata } from '../install/types.ts';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { AUTHOR_ERROR, authors, eligibleReviewers, personalRoot } from '../flow-config.ts';
+import { AUTHOR_ERROR, authors, eligibleReviewers } from '../config/reviewers.ts';
+import { personalRoot } from '../config/paths.ts';
 import { currentBranch, loadProject } from '../project.ts';
 import { packageStatus } from '../install/package.ts';
 import { pluginRoot } from '../shared/plugin.ts';

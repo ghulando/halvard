@@ -1,4 +1,4 @@
-import type { PackageMetadata, PackageStatus } from '../types.ts';
+import type { PackageMetadata, PackageStatus } from './types.ts';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';

@@ -1,4 +1,4 @@
-import type { FactoryJob } from '../types.ts';
+import type { FactoryJob } from './store.ts';
 import type { JobEvent } from './store.ts';
 import {
   closeSync,

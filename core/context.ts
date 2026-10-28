@@ -2,7 +2,8 @@ import type { Project, Skill } from './types.ts';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { authors, eligibleReviewers, workspaceRoot } from './flow-config.ts';
+import { authors, eligibleReviewers } from './config/reviewers.ts';
+import { workspaceRoot } from './config/paths.ts';
 import { CONFIG, projectPath } from './project.ts';
 
 export function skills(project: Project) {

@@ -1,11 +1,3 @@
-import type {
-  HistoryHarness,
-  HistoryDigest,
-  HistoryEntry,
-  HistoryNotice,
-  HistoryPlan,
-  HistoryProcess,
-} from '../types.ts';
 import { randomUUID, createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
@@ -20,8 +12,50 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
-import { personalRoot, workspaceRoot } from '../flow-config.ts';
+import { personalRoot, workspaceRoot } from '../config/paths.ts';
 import { privateDirectory } from '../state.ts';
+
+// History cleanup and retro read transcript formats known only for these hosts.
+export type HistoryHarness = 'pi' | 'claude' | 'codex';
+
+export interface HistoryProcess {
+  pid: number;
+  comm: string;
+}
+
+export interface HistoryEntry {
+  harness: HistoryHarness | 'workflow';
+  path: string;
+  bytes: number;
+  mtimeMs: number;
+  rule: string;
+  snapshot: string;
+  appendIdentity?: { dev: number; ino: number };
+}
+
+export interface HistoryNotice {
+  path: string;
+  reason: string;
+}
+
+export interface HistoryPlan {
+  version: 1;
+  harnesses: HistoryHarness[];
+  roots: Record<HistoryHarness | 'workflow', string>;
+  entries: HistoryEntry[];
+  keptLive: HistoryNotice[];
+  deferred: HistoryNotice[];
+}
+
+export interface HistoryDigest {
+  harness: HistoryHarness;
+  project: string;
+  id: string;
+  firstTimestamp: string | null;
+  lastTimestamp: string | null;
+  promptCount: number;
+  firstPrompt: string;
+}
 
 const harnessNames: HistoryHarness[] = ['claude', 'pi', 'codex'];
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;

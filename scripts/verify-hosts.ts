@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import type { PackedArchive, NativeHookOutput } from '../core/types.ts';
+import type { PackedArchive } from '../core/install/types.ts';
+import type { NativeHookOutput } from '../core/types.ts';
 // Optional native-loader checks. No model prompts, user configuration or trust changes.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';

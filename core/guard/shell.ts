@@ -1,9 +1,11 @@
-import type { ReadCommand, ShellKind } from '../types.ts';
+import type { ReadCommand } from '../types.ts';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
-import { workspaceRoot } from '../flow-config.ts';
+import { workspaceRoot } from '../config/paths.ts';
 import { inside, outsideProject, physicalPath } from '../project.ts';
+
+export type ShellKind = 'read' | 'outside' | 'branch' | 'opaque' | 'mutation';
 
 // Redirections that discard output or merge stderr cannot write project files.
 const DISCARD = /^(?:[12]?>\/dev\/null|2>&1)(?=[\s;|&]|$)/;

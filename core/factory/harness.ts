@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MODEL_KEY_NAMES } from '../flow-config.ts';
+import { MODEL_KEY_NAMES } from '../config/container.ts';
 import { driver } from '../harnesses/index.ts';
 
 export type { Stage } from '../harnesses/types.ts';

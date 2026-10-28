@@ -1,4 +1,5 @@
-import type { FactoryJob, Receipt, ReviewRecord } from '../types.ts';
+import type { FactoryJob } from './store.ts';
+import type { Receipt, ReviewRecord } from '../types.ts';
 import { spawnSync } from 'node:child_process';
 import { matches } from '../project.ts';
 

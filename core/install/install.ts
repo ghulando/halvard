@@ -8,7 +8,7 @@ import type {
   PackageStatus,
   LinkPlan,
   InstallOptions,
-} from '../types.ts';
+} from './types.ts';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { CONFIG, inside, projectPath } from '../project.ts';

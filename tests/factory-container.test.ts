@@ -17,7 +17,7 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
-import { factoryConfig } from '../core/flow-config.ts';
+import { factoryConfig } from '../core/config/factory.ts';
 import { boxCommand } from '../core/factory/container.ts';
 import { factoryCommand } from '../core/factory/command.ts';
 import { jobEvents } from '../core/factory/store.ts';

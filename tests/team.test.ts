@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { teamConfig } from '../core/flow-config.ts';
+import { teamConfig } from '../core/config/team.ts';
 import { loadProject } from '../core/project.ts';
 import { handle } from '../core/runtime.ts';
 

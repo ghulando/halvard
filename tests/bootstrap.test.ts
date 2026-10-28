@@ -27,7 +27,8 @@ import { flowConfig } from '../core/flow-config.ts';
 import { git, loadProject } from '../core/project.ts';
 import { proposeSetup } from '../core/setup/setup.ts';
 import { doctor } from '../core/setup/doctor.ts';
-import { handle, pluginRoot, quote } from '../core/runtime.ts';
+import { handle } from '../core/runtime.ts';
+import { pluginRoot, quote } from '../core/shared/plugin.ts';
 
 const commit = (root: string) =>
   git(root, [

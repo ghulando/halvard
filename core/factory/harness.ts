@@ -12,7 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MODEL_KEY_NAMES } from '../flow-config.ts';
-import { pluginRoot } from '../runtime.ts';
+import { pluginRoot } from '../shared/plugin.ts';
 import { hostResult } from '../workflow/review.ts';
 
 export type Stage = 'plan' | 'build';

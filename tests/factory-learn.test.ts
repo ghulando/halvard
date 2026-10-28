@@ -22,7 +22,7 @@ import { jobEvents, metrics } from '../core/factory/board.ts';
 import { changeClass, ciState } from '../core/factory/outcomes.ts';
 import { changedFiles } from '../core/factory/ship.ts';
 import { createJob, jobFile, loadJob, recordEvent, repoHome } from '../core/factory/store.ts';
-import { pluginRoot } from '../core/runtime.ts';
+import { pluginRoot } from '../core/shared/plugin.ts';
 import { commit, env, repo, stubs } from './factory-stubs.ts';
 
 const DAY = 24 * 3600 * 1000;

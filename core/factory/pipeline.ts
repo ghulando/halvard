@@ -28,7 +28,9 @@ import {
 } from '../flow-config.ts';
 import { checkImage } from './container.ts';
 import { loadProject, matches } from '../project.ts';
-import { completeTask, pluginRoot, protectedPatterns } from '../runtime.ts';
+import { protectedPatterns } from '../guard/protected.ts';
+import { pluginRoot } from '../shared/plugin.ts';
+import { completeTask } from '../workflow/complete.ts';
 import { reviewCommand } from '../workflow/review.ts';
 import { digest, fingerprint, sessionKey } from '../state.ts';
 import { nested, planDigest, startTask } from '../workflow/tasks.ts';

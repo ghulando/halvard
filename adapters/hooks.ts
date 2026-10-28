@@ -1,6 +1,6 @@
 import type { HookResult, NativeHookOutput } from '../core/types.ts';
 import { resolve } from 'node:path';
-import { pluginRoot, quote } from '../core/runtime.ts';
+import { pluginRoot, quote } from '../core/shared/plugin.ts';
 
 // Cursor's own shape. It does not enforce ask, and its CLI fires no prompt hook, so the
 // user approves a request from a terminal instead of with a chat phrase.

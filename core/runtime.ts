@@ -10,58 +10,24 @@ import type {
 } from './types.ts';
 import { HARNESSES } from './types.ts';
 import { spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import {
-  closeSync,
-  existsSync,
-  fstatSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readSync,
-  readdirSync,
-  realpathSync,
-  statSync,
-  writeFileSync,
-  writeSync,
-} from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { pathToFileURL, fileURLToPath } from 'node:url';
-import {
-  CONFIG,
-  currentBranch,
-  findRoot,
-  gateSteps,
-  inside,
-  loadProject,
-  matches,
-  projectPath,
-} from './project.ts';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { currentBranch, findRoot, inside, loadProject, matches, projectPath } from './project.ts';
 import { startupContext } from './context.ts';
 import { commands, isShipping, rootGit, shellKind } from './guard/shell.ts';
 import { normalize } from './guard/tools.ts';
-import {
-  HOOK_BUDGET,
-  digest,
-  fingerprint,
-  invalidate,
-  privateDirectory,
-  sessionKey,
-  withState,
-} from './state.ts';
+import { HOOK_BUDGET, digest, fingerprint, sessionKey, withState } from './state.ts';
 import { hasReview } from './workflow/review.ts';
 import { evaluatePolicy } from './guard/policy.ts';
 import { parseCommand } from './cli.ts';
-import { planIntact, readTask, taskWorkspace } from './workflow/tasks.ts';
+import { planIntact, readTask } from './workflow/tasks.ts';
 import { assignment, providers, workspaceRoot } from './flow-config.ts';
 import { packageDigest } from './install/package.ts';
 import { claimsDone, completionStatus } from './workflow/status.ts';
-
-export const pluginRoot = fileURLToPath(new URL('../', import.meta.url));
-// The guard re-parses printed commands and rejects a backslash outside quotes,
-// so text with an apostrophe goes in double quotes instead of '\''.
-export const quote = (text: string) =>
-  text.includes("'") ? '"' + text.replace(/["\\$`]/g, '\\$&') + '"' : "'" + text + "'";
+import { PLAN_CHANGED } from './workflow/complete.ts';
+import { protectedPatterns } from './guard/protected.ts';
+import { pluginRoot, quote } from './shared/plugin.ts';
 
 const runnerPath = () => resolve(pluginRoot, 'bin/halvard.ts');
 
@@ -208,40 +174,6 @@ async function extensions(project: Project) {
     loaded.push(module);
   }
   return loaded;
-}
-
-// Edits that could rewrite the agent's own permissions, Git internals or the checks
-// behind the done proof still ask.
-export function protectedPatterns(project: Project) {
-  const { root, config } = project;
-  const patterns = [
-    CONFIG,
-    `**/${CONFIG}`,
-    '.git',
-    '.git/**',
-    '**/.git',
-    '**/.git/**',
-    '.pi/**',
-    '.claude/**',
-    '.codex/**',
-    '.grok/**',
-    '.cursor/**',
-    '.agents/plugins/**',
-    ...config.extensions,
-  ];
-  for (const command of [...(config.gate ? gateSteps(config.gate) : []), config.review]) {
-    if (command && command[0]!.includes('/') && inside(root, resolve(root, command[0]!))) {
-      patterns.push(projectPath(root, root, command[0]!));
-    }
-    // Scripts handed to an interpreter, as in ["node", "scripts/check.ts"].
-    for (const arg of command?.slice(1) ?? []) {
-      const file = resolve(root, arg);
-      if (inside(root, file) && existsSync(file) && statSync(file).isFile()) {
-        patterns.push(projectPath(root, root, arg));
-      }
-    }
-  }
-  return patterns;
 }
 
 const APPROVAL_STALE =
@@ -566,9 +498,6 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
   });
 }
 
-const PLAN_CHANGED =
-  'The Approved plan section changed after approval, so the approval no longer holds. Restore it, or ask the user for a new approval.';
-
 // A hand-written task without workflow metadata has no recorded approval to protect.
 function planStands(project: Project, file: string) {
   try {
@@ -576,161 +505,4 @@ function planStands(project: Project, file: string) {
   } catch {
     return true;
   }
-}
-
-// The completion checks the hook applies to a done edit, for a runner that marks the task
-// done itself: the session's gate receipt and the independent review cover this tree. The
-// task file is agent-editable, so a runner passes the plan digest it holds itself, or null
-// for a task without an approved plan; the hook can only compare the file with itself.
-export async function completeTask(
-  cwd: string,
-  path: string,
-  gateSession: string,
-  expected?: { plan: string | null },
-) {
-  const project = loadProject(cwd);
-  const { root, config } = project;
-  const task = readTask(project, path);
-  if (currentBranch(root) !== task.metadata.branch) {
-    throw new Error('task belongs to another branch');
-  }
-  if (!planIntact(task)) throw new Error(PLAN_CHANGED);
-  if (expected && (task.metadata.plan?.digest ?? null) !== expected.plan) {
-    throw new Error(PLAN_CHANGED);
-  }
-  const status = completionStatus(config.doneMarker);
-  const line = task.content.match(/^\*\*Status:\*\*[^\n]*$/m);
-  if (!line) throw new Error('task has no **Status:** line');
-  if (line[0].trimEnd() === status) throw new Error('task is already done');
-  const after = task.content.replace(/^\*\*Status:\*\*[^\n]*$/m, () => status);
-  const tree = fingerprint(root);
-  const gate = await withState(root, gateSession, (state) => state.pass);
-  if (gate?.tree !== tree) throw new Error('run the full configured gate on this tree first');
-  if (config.workflow.requireReview && !(await hasReview(project, task.file, tree))) {
-    throw new Error('get a passing independent review on this tree before marking done');
-  }
-  writeFileSync(resolve(root, task.file), after);
-  // The tree the runner commits: the reviewed tree plus the status line.
-  return { task: task.file, tree, gate, final: fingerprint(root) };
-}
-
-const GATE_TIMEOUT = 20 * 60 * 1000;
-const GATE_TAIL = 40;
-
-// The log sits with the task's team files; a branch without a task uses the repository folder.
-function gateLogDirectory(project: Project) {
-  const { root, config } = project;
-  const branch = currentBranch(root);
-  const dir = resolve(root, config.workflow.taskDirectory);
-  const tasks = (existsSync(dir) ? readdirSync(dir) : [])
-    .filter((name) => name.endsWith('.md'))
-    .flatMap((name) => {
-      // A hand-written file without workflow metadata names no branch.
-      try {
-        const task = readTask(project, `${config.workflow.taskDirectory}/${name}`);
-        return task.metadata.branch === branch ? [task.file] : [];
-      } catch {
-        return [];
-      }
-    })
-    .sort((a, b) => statSync(resolve(root, b)).mtimeMs - statSync(resolve(root, a)).mtimeMs);
-  if (tasks.length) return taskWorkspace(root, basename(tasks[0]!, '.md'));
-  mkdirSync(workspaceRoot(), { recursive: true, mode: 0o700 });
-  return privateDirectory(resolve(workspaceRoot(), basename(root)));
-}
-
-// Reads backward from the end of the file to the step's start until it holds count whole
-// lines. Output is kept as written except for the final line break.
-function lastLines(file: string, from: number, count: number) {
-  const fd = openSync(file, 'r');
-  const split = (text: Buffer) => text.toString('utf8').replace(/\n$/, '').split('\n');
-  try {
-    let end = fstatSync(fd).size;
-    let text = Buffer.alloc(0);
-    while (end > from && split(text).length <= count) {
-      const chunk = Buffer.alloc(Math.min(64 * 1024, end - from));
-      end -= chunk.length;
-      readSync(fd, chunk, 0, chunk.length, end);
-      text = Buffer.concat([chunk, text]);
-    }
-    return split(text).slice(-count).join('\n');
-  } finally {
-    closeSync(fd);
-  }
-}
-
-export async function runGate(cwd: string, key: string) {
-  const project = loadProject(cwd);
-  const { root, config } = project;
-  if (!config.gate) throw new Error('no project gate configured');
-  const directory = gateLogDirectory(project);
-  const before = fingerprint(root);
-  const run = randomUUID();
-  const revision = await withState(root, key, (state) => {
-    invalidate(state);
-    state.gate = run;
-    return state.revision;
-  });
-  // The full output goes to the log; the agent gets one line per step and the failing tail.
-  // Each run creates its own file, so overlapping runs keep both logs and an existing
-  // link is never written through.
-  const log = join(directory, `gate-${key.slice(0, 12)}-${run.slice(0, 8)}.log`);
-  const fd = openSync(log, 'wx', 0o600);
-  const deadline = Date.now() + GATE_TIMEOUT;
-  const lines: string[] = [];
-  let failed: { label: string; offset: number } | null = null;
-  try {
-    for (const step of gateSteps(config.gate)) {
-      const label = step.join(' ');
-      if (failed) {
-        lines.push(`  skip  ${label}`);
-        continue;
-      }
-      const offset = fstatSync(fd).size;
-      writeSync(fd, `$ ${label}\n`);
-      const started = Date.now();
-      const result = spawnSync(step[0]!, step.slice(1), {
-        cwd: root,
-        stdio: ['inherit', fd, fd],
-        timeout: Math.max(1, deadline - started),
-        shell: false,
-      });
-      const seconds = ((Date.now() - started) / 1000).toFixed(1);
-      if (result.status === 0 && !result.error) {
-        lines.push(`  pass  ${label} (${seconds}s)`);
-        continue;
-      }
-      const why = result.error
-        ? result.error.message
-        : result.signal
-          ? `signal ${result.signal}`
-          : `exit ${result.status}`;
-      lines.push(`  FAIL  ${label} (${why}, ${seconds}s)`);
-      failed = { label, offset };
-    }
-  } finally {
-    closeSync(fd);
-  }
-  const summary = [`workflow: gate steps`, ...lines];
-  if (failed) {
-    summary.push(
-      `workflow: last ${GATE_TAIL} lines of ${failed.label}`,
-      lastLines(log, failed.offset, GATE_TAIL),
-    );
-  }
-  summary.push(`workflow: full gate log ${log}`);
-  process.stdout.write(summary.join('\n') + '\n');
-  const after = fingerprint(root);
-  const passed = await withState(root, key, (state) => {
-    if (failed) return 'checks failed or timed out';
-    if (before !== after) return 'source tree changed during checks';
-    if (state.revision !== revision || state.gate !== run) {
-      return 'overlapped a guarded mutation or unclassified tool';
-    }
-    state.pass = { tree: after, command: config.gate!, at: new Date().toISOString() };
-    state.gate = null;
-    return true;
-  });
-  if (passed !== true) throw new Error(`gate failed: ${passed}; fix the cause and rerun`);
-  process.stdout.write('workflow: gate passed on the current tree\n');
 }

@@ -22,7 +22,8 @@ import { basename, join } from 'node:path';
 import test from 'node:test';
 import { parseCommand } from '../core/cli.ts';
 import { doctor } from '../core/setup/doctor.ts';
-import { handle, pluginRoot, quote } from '../core/runtime.ts';
+import { handle } from '../core/runtime.ts';
+import { pluginRoot, quote } from '../core/shared/plugin.ts';
 import { recoverReview, reviewKey } from '../core/workflow/review.ts';
 import {
   handoffTask,

@@ -22,7 +22,7 @@ import { boxCommand } from '../core/factory/container.ts';
 import { factoryCommand } from '../core/factory/pipeline.ts';
 import { jobEvents } from '../core/factory/board.ts';
 import { loadJob } from '../core/factory/store.ts';
-import { pluginRoot } from '../core/runtime.ts';
+import { pluginRoot } from '../core/shared/plugin.ts';
 import { env, repo, stubs } from './factory-stubs.ts';
 
 const STUB_ENV = [

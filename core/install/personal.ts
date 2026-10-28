@@ -6,7 +6,7 @@ import { flowConfig, personalRoot, personalSettings, workspaceRoot } from '../fl
 import { projectPath } from '../project.ts';
 import { applyInstallation } from './transaction.ts';
 import { packageStatus } from './package.ts';
-import { pluginRoot } from '../runtime.ts';
+import { pluginRoot } from '../shared/plugin.ts';
 
 export function personalInstallPlan(
   home = homedir(),

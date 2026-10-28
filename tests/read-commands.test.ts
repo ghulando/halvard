@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
 import { shellKind } from '../core/guard/shell.ts';
-import { handle, runGate } from '../core/runtime.ts';
+import { handle } from '../core/runtime.ts';
+import { runGate } from '../core/workflow/gate.ts';
 import { sessionKey, withState } from '../core/state.ts';
 
 const reads = [

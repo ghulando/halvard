@@ -45,7 +45,8 @@ import {
   reviewKey,
 } from '../core/workflow/review.ts';
 import { fingerprint, sessionKey, withState } from '../core/state.ts';
-import { handle, runGate } from '../core/runtime.ts';
+import { handle } from '../core/runtime.ts';
+import { runGate } from '../core/workflow/gate.ts';
 
 function fixture(t: TestContext, workflow = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'workflow-pack-')));
@@ -1265,7 +1266,7 @@ test('review survives native pre/post hooks', async (t) => {
     const task = start(root, author);
     const key = sessionKey(root, author, 'review-test');
     const reviewer = author === 'claude' ? 'codex' : 'claude';
-    const { pluginRoot, quote } = await import('../core/runtime.ts');
+    const { pluginRoot, quote } = await import('../core/shared/plugin.ts');
     const command = `node ${quote(pluginRoot + 'bin/halvard.ts')} review ${task.task} --author ${author} --reviewer ${reviewer} --round 1 --gate-session ${key}`;
     const payload = {
       cwd: root,

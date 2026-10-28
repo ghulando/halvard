@@ -181,6 +181,28 @@ export function recordEvent(root: string, id: string, event: string, data: objec
 export const jobFile = (root: string, id: string, name: string) =>
   join(jobDirectory(root, id), name);
 
+// The job's event log as recordEvent wrote it; a torn last line is skipped.
+export interface JobEvent {
+  at: string;
+  event: string;
+  [key: string]: unknown;
+}
+
+export function jobEvents(root: string, id: string): JobEvent[] {
+  const file = jobFile(root, id, 'events.jsonl');
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as JobEvent];
+      } catch {
+        return [];
+      }
+    });
+}
+
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0);

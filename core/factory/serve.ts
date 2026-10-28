@@ -7,19 +7,10 @@ import { monthSpend, writeBoard } from './board.ts';
 import { autoMerge, refreshOutcomes } from './outcomes.ts';
 import { retroDue, retroSource } from './retro.ts';
 import { issueSource, labeledBy } from './github.ts';
-import {
-  type Context,
-  ACTIVE,
-  approval,
-  blocker,
-  build,
-  newJob,
-  park,
-  plan,
-  replan,
-  say,
-  stopRequested,
-} from './pipeline.ts';
+import { say, stopRequested, type Context } from './context.ts';
+import { ACTIVE, blocker, newJob, park } from './jobs.ts';
+import { approval, plan, replan } from './plan.ts';
+import { build } from './build.ts';
 
 const WAITING = ['planning', 'awaiting-approval', 'approved'];
 

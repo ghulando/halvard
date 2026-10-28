@@ -50,7 +50,7 @@ try {
     process.stdout.write(help);
   } else if (command === 'factory') {
     // The factory has its own subcommand grammar.
-    const { factoryCommand } = await import('../core/factory/pipeline.ts');
+    const { factoryCommand } = await import('../core/factory/command.ts');
     await factoryCommand(process.cwd(), args);
   } else {
     const { positional, flags } = parseCommand(command, args);

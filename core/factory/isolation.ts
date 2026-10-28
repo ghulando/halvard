@@ -1,5 +1,5 @@
 import type { FactoryJob } from '../types.ts';
-import type { Context } from './pipeline.ts';
+import type { Context } from './context.ts';
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import { personalRoot, workspaceRoot } from '../flow-config.ts';

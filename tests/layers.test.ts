@@ -69,6 +69,36 @@ test('imports point down the layers', () => {
   assert.deepEqual(violations, []);
 });
 
+// The first import cycle found by a depth-first walk, as the files around it.
+function cycle(graph: Map<string, string[]>) {
+  const done = new Set<string>();
+  const path: string[] = [];
+  const walk = (file: string): string[] | null => {
+    const at = path.indexOf(file);
+    if (at >= 0) return [...path.slice(at), file];
+    if (done.has(file)) return null;
+    path.push(file);
+    for (const target of graph.get(file) ?? []) {
+      const found = walk(target);
+      if (found) return found;
+    }
+    path.pop();
+    done.add(file);
+    return null;
+  };
+  for (const file of graph.keys()) {
+    const found = walk(file);
+    if (found) return found;
+  }
+  return null;
+}
+
+test('core has no import cycles', () => {
+  const core = sources.filter((file) => file.startsWith('core/'));
+  const graph = new Map(core.map((file) => [file, imports(file)]));
+  assert.equal(cycle(graph)?.join(' -> ') ?? null, null);
+});
+
 test('the import scan sees relative imports', () => {
   assert.ok(imports('bin/hook.ts').includes('core/runtime.ts'));
   assert.ok(imports('bin/halvard.ts').includes('core/workflow/complete.ts'));

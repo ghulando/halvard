@@ -1,8 +1,7 @@
-import type { Context } from './pipeline.ts';
+import type { Context } from './context.ts';
 import type { Source } from './github.ts';
 import { existsSync } from 'node:fs';
-import { jobEvents } from './board.ts';
-import { jobDirectory, listJobs } from './store.ts';
+import { jobDirectory, jobEvents, listJobs } from './store.ts';
 
 const DAY = 24 * 3600 * 1000;
 // A problem recurs when it shows up in at least this many jobs.

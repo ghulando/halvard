@@ -161,7 +161,7 @@ flowchart TB
     reviewers["<b>Reviewer CLIs</b><br/>[CLI processes]"]
 
     subgraph engine["Hook guard, Pi extension and halvard CLI [Containers]"]
-        adapter["<b>Harness adapter</b><br/>[Component: TypeScript]<br/>Maps each harness's hook payload and output format"]
+        adapter["<b>Harness drivers</b><br/>[Component: TypeScript]<br/>One per tool: hook payload and output format, headless agent and review commands and results"]
         runtime["<b>Runtime</b><br/>[Component: TypeScript]<br/>Handles each event: startup context, approvals, done checks, extensions"]
         shell["<b>Shell classifier</b><br/>[Component: TypeScript]<br/>Parses shell commands into reads, writes, Git and shipping operations"]
         tools["<b>Tool normalizer</b><br/>[Component: TypeScript]<br/>Turns edits and patches into the files and contents they produce"]
@@ -217,7 +217,7 @@ flowchart TB
     subgraph runner["Factory runner [Container]"]
         commands["<b>Job pipeline</b><br/>[Component: TypeScript]<br/>Commands, plan and build stages, checks, park, ship"]
         serve["<b>Serve loop</b><br/>[Component: TypeScript]<br/>Polls labels, claims issues, runs up to concurrency jobs (1 to 4), starts retros"]
-        driver["<b>Harness driver</b><br/>[Component: TypeScript]<br/>Headless command lines, scrubbed environment, timeouts, cost"]
+        driver["<b>Agent runner</b><br/>[Component: TypeScript]<br/>Runs headless agents from the harness drivers: scrubbed environment, timeouts, cost"]
         box["<b>Container box</b><br/>[Component: TypeScript]<br/>docker run flags, mounts, image version check"]
         store["<b>Job store</b><br/>[Component: TypeScript]<br/>Job folders, locks, events"]
         ship["<b>Ship and evidence</b><br/>[Component: TypeScript]<br/>Git helpers, changed files, risk, pull request body"]
@@ -376,14 +376,14 @@ _Key: dashed frames are deployment nodes; boxes inside them are the containers d
 | Element                 | Files                                                                                                                                                                                                                       |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Hook guard              | `bin/hook.ts`, `hooks/hooks.json` (Claude Code), `hooks/codex.json`, `hooks/grok.json`, `hooks/cursor.json`                                                                                                                 |
-| Pi extension            | `adapters/pi.ts`, `adapters/plan-ui.ts`, `adapters/plan-utils.ts`                                                                                                                                                           |
+| Pi extension            | `adapters/pi.ts`, `adapters/plan-ui.ts`, `adapters/plan-utils.ts`, `adapters/messages.ts`                                                                                                                                   |
 | halvard CLI             | `bin/halvard.ts`, `core/cli.ts`                                                                                                                                                                                             |
 | Factory runner          | `core/factory/`, started by `bin/halvard.ts factory`                                                                                                                                                                        |
 | Skills                  | `skills/*/SKILL.md`; the harness manifests in `.claude-plugin/`, `.codex-plugin/`, `.grok-plugin/`                                                                                                                          |
 | Workflow state          | `core/state.ts` (`$TMPDIR/halvard-<uid>/<repo digest>`)                                                                                                                                                                     |
 | Task workspace          | `core/workflow/tasks.ts`, `core/flow-config.ts` (`HALVARD_WORKSPACE`, default `~/.halvard`)                                                                                                                                 |
 | Factory store           | `core/factory/store.ts` (`HALVARD_FACTORY_HOME`, default `~/.halvard-factory`)                                                                                                                                              |
-| Harness adapter         | `adapters/payload.ts`, `adapters/hooks.ts`, `adapters/messages.ts`                                                                                                                                                          |
+| Harness drivers         | `core/harnesses/`: one file per tool, listed in `core/harnesses/index.ts`                                                                                                                                                   |
 | Runtime                 | `core/runtime.ts`, `core/context.ts`, `core/workflow/status.ts`, `core/shared/plugin.ts`                                                                                                                                    |
 | Shell classifier        | `core/guard/shell.ts`                                                                                                                                                                                                       |
 | Tool normalizer         | `core/guard/tools.ts`                                                                                                                                                                                                       |
@@ -395,7 +395,7 @@ _Key: dashed frames are deployment nodes; boxes inside them are the containers d
 | Review runner           | `core/workflow/review.ts`                                                                                                                                                                                                   |
 | Job pipeline            | `core/factory/pipeline.ts`, with `core/factory/isolation.ts` for the scrubbed environment, mounts and Git checks, `core/factory/github.ts` for issues and label events, and `core/factory/prompts.ts` for the agent prompts |
 | Serve loop              | `core/factory/serve.ts`                                                                                                                                                                                                     |
-| Harness driver          | `core/factory/harness.ts`                                                                                                                                                                                                   |
+| Agent runner            | `core/factory/harness.ts`                                                                                                                                                                                                   |
 | Container box           | `core/factory/container.ts`                                                                                                                                                                                                 |
 | Job store               | `core/factory/store.ts`                                                                                                                                                                                                     |
 | Ship and evidence       | `core/factory/ship.ts` for the Git and `gh` helpers, changed files, risk and the pull request body; `ship()` in `core/factory/pipeline.ts` uses them to commit, push and open the pull request                              |

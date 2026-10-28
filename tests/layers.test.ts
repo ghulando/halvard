@@ -39,6 +39,12 @@ const rules: { name: string; from: (file: string) => boolean; to: (target: strin
       to: (target) => !target.startsWith('core/shared/') && target !== 'core/types.ts',
     },
     {
+      // Each tool's driver knows only its own tool; the engine decides what to do with it.
+      name: 'core/harnesses imports only core/harnesses, core/shared and core/types.ts',
+      from: (file) => file.startsWith('core/harnesses/'),
+      to: (target) => !/^core\/(harnesses|shared)\//.test(target) && target !== 'core/types.ts',
+    },
+    {
       name: 'core/guard does not import workflow, factory, install, setup or the CLI',
       from: (file) => file.startsWith('core/guard/'),
       to: (target) => /^core\/(workflow|factory|install|setup)\/|^core\/cli\.ts$/.test(target),

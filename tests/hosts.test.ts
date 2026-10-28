@@ -8,7 +8,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { canonicalTool, hostHarness, toHookPayload } from '../adapters/payload.ts';
+import { HARNESSES } from '../core/types.ts';
+import { providers } from '../core/flow-config.ts';
+import { driver, drivers, hostHarness, toHookPayload } from '../core/harnesses/index.ts';
+import { canonicalTool } from '../core/harnesses/tool-input.ts';
 
 const hook = fileURLToPath(new URL('../bin/hook.ts', import.meta.url));
 const runner = fileURLToPath(new URL('../bin/halvard.ts', import.meta.url));
@@ -304,4 +307,12 @@ test('a commit message that names the approve command still asks as shipping', (
     }),
   ).output!;
   assert.match(result.agent_message!, /commits, merges, pushes or publishes/);
+});
+
+test('every harness and review provider has a driver', () => {
+  for (const name of HARNESSES) {
+    assert.ok(driver(name)?.hooks && driver(name)?.agent, `${name} has no hook or agent driver`);
+  }
+  for (const name of providers) assert.ok(driver(name)?.review, `${name} has no review driver`);
+  assert.equal(new Set(drivers.map((entry) => entry.name)).size, drivers.length);
 });

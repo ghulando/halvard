@@ -22,7 +22,7 @@ import { handle } from '../core/runtime.ts';
 import { pluginRoot, quote } from '../core/shared/plugin.ts';
 import { runGate } from '../core/workflow/gate.ts';
 import { sessionKey, fingerprint, stateDirectory, withState } from '../core/state.ts';
-import { hookOutput } from '../adapters/hooks.ts';
+import { hookOutput } from '../core/harnesses/index.ts';
 import { install, installPlan } from '../core/install/install.ts';
 import { loadProject } from '../core/project.ts';
 import { skills } from '../core/context.ts';

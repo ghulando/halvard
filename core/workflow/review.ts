@@ -26,116 +26,18 @@ import { skills } from '../context.ts';
 import { currentBranch, git, loadProject, matches, projectPath } from '../project.ts';
 import { readTask, taskWorkspace } from './tasks.ts';
 import { digest, fingerprint, stateDirectory, withState } from '../state.ts';
+import { driver } from '../harnesses/index.ts';
 
+// The headless command line for one review; throws for a reviewer that cannot run headless.
 export function reviewCommand(
   reviewer: string,
   settings: ReviewerSettings,
   output: string,
   input: string,
 ) {
-  const model = settings.model ? ['--model', settings.model] : [];
-  if (reviewer === 'claude') {
-    return [
-      'claude',
-      '-p',
-      '--output-format',
-      'json',
-      '--tools',
-      '',
-      '--strict-mcp-config',
-      '--mcp-config',
-      '{"mcpServers":{}}',
-      '--setting-sources',
-      'user',
-      '--settings',
-      '{"disableAllHooks":true}',
-      '--no-session-persistence',
-      ...model,
-      'Review the supplied evidence and return only the requested JSON verdict.',
-    ];
-  }
-  if (reviewer === 'codex') {
-    return [
-      'codex',
-      'exec',
-      '--ignore-user-config',
-      '--ignore-rules',
-      '--sandbox',
-      'read-only',
-      '--ephemeral',
-      '--skip-git-repo-check',
-      '--color',
-      'never',
-      '-o',
-      output,
-      ...model,
-      '-',
-    ];
-  }
-  if (reviewer === 'grok') {
-    // Grok's headless mode does not read stdin; the evidence goes in as a prompt file.
-    return [
-      'grok',
-      '--prompt-file',
-      input,
-      '--output-format',
-      'json',
-      '--disallowed-tools',
-      'search_replace,write_file,run_terminal_command,web_search,web_fetch,spawn_subagent',
-      '--no-subagents',
-      '--disable-web-search',
-      ...(settings.model ? ['-m', settings.model] : []),
-    ];
-  }
-  if (reviewer === 'cursor') {
-    // Ask mode is Cursor's read-only mode; the evidence arrives on stdin and in the input file.
-    return [
-      'cursor-agent',
-      '-p',
-      '--mode',
-      'ask',
-      '--output-format',
-      'json',
-      ...model,
-      `Review the evidence on standard input (also saved at ${input}) and return only the requested JSON verdict.`,
-    ];
-  }
-  if (reviewer === 'ollama' && settings.model) {
-    if (settings.transport === 'pi') {
-      return [
-        'pi',
-        '-p',
-        '--no-session',
-        '--no-tools',
-        '--no-extensions',
-        '--no-skills',
-        '--no-prompt-templates',
-        '--no-themes',
-        '--no-context-files',
-        '--provider',
-        'ollama',
-        '--model',
-        settings.model,
-        '--thinking',
-        'off',
-        `@${input}`,
-      ];
-    }
-    return ['ollama', 'run', settings.model];
-  }
-  throw new Error('unsupported or unconfigured reviewer');
-}
-
-// Grok and Cursor print one JSON result object in headless JSON mode.
-export function hostResult(reviewer: 'grok' | 'cursor', stdout: string) {
-  const envelope = JSON.parse(stdout) as { is_error?: unknown; result?: unknown; text?: unknown };
-  const text = reviewer === 'grok' ? (envelope.text ?? envelope.result) : envelope.result;
-  if (envelope.is_error || typeof text !== 'string') {
-    throw new Error(
-      `${reviewer === 'grok' ? 'Grok' : 'Cursor'} did not produce a successful review`,
-    );
-  }
-  return text;
+  const review = driver(reviewer)?.review;
+  if (!review) throw new Error('unsupported or unconfigured reviewer');
+  return review.command({ settings, output, input });
 }
 
 export function reviewSnapshot(project: Project, task: Task) {
@@ -560,7 +462,7 @@ export async function runReview(
       const result = await execute(
         command,
         scratch,
-        reviewer === 'ollama' && settings!.transport === 'pi' ? '' : prompt,
+        driver(reviewer)!.review!.stdin(settings!) ? prompt : '',
         config.workflow.reviewTimeout,
         async (pid) => {
           await withState(root, key, (state) => {
@@ -570,22 +472,7 @@ export async function runReview(
           });
         },
       );
-      text = result.stdout;
-      if (reviewer === 'codex') text = readFileSync(output, 'utf8');
-      if (reviewer === 'claude') {
-        const parsed: unknown = JSON.parse(text);
-        const envelope = parsed as {
-          is_error?: unknown;
-          result?: unknown;
-          modelUsage?: Record<string, unknown>;
-        };
-        if (envelope.is_error || typeof envelope.result !== 'string') {
-          throw new Error('Claude did not produce a successful review');
-        }
-        text = envelope.result;
-        models = Object.keys(envelope.modelUsage ?? {});
-      }
-      if (reviewer === 'grok' || reviewer === 'cursor') text = hostResult(reviewer, text);
+      ({ text, models } = driver(reviewer)!.review!.result(result.stdout, output));
     }
     const verdict = parseVerdict(text, deferrals);
     if (fingerprint(root) !== before) {

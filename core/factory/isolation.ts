@@ -1,8 +1,8 @@
-import type { FactoryJob } from '../types.ts';
-import type { Context } from './pipeline.ts';
+import type { FactoryJob } from './store.ts';
+import type { Context } from './context.ts';
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
-import { personalRoot, workspaceRoot } from '../flow-config.ts';
+import { personalRoot, workspaceRoot } from '../config/paths.ts';
 import { boxCommand, boxName, removeBox, type Box } from './container.ts';
 import { scrubbedEnv, type Wrapped } from './harness.ts';
 import { gitRunner } from './ship.ts';

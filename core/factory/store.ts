@@ -1,4 +1,4 @@
-import type { FactoryJob } from '../types.ts';
+import type { Harness } from '../types.ts';
 import { randomUUID } from 'node:crypto';
 import {
   appendFileSync,
@@ -14,6 +14,54 @@ import {
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { privateDirectory } from '../state.ts';
+
+export type FactoryStage =
+  | 'awaiting-plan'
+  | 'planning'
+  | 'awaiting-approval'
+  | 'approved'
+  | 'testing'
+  | 'building'
+  | 'gating'
+  | 'reviewing'
+  | 'shipping'
+  | 'committed'
+  | 'pr-open'
+  | 'parked';
+
+export interface FactoryJob {
+  version: 1;
+  id: string;
+  repo: string;
+  title: string;
+  issue: { number: number; url: string } | null;
+  small: boolean;
+  fix: boolean;
+  author: Harness;
+  stage: FactoryStage;
+  worktree: string | null;
+  branch: string | null;
+  task: string | null;
+  // proposedAt is when the plan went to the issue; a label added before it approves nothing.
+  plan: {
+    digest: string;
+    approvedBy: string | null;
+    at: string | null;
+    proposedAt?: string | null;
+  } | null;
+  reviewer: string | null;
+  round: number;
+  fixPasses: number;
+  parked: { reason: string; detail: string; at?: string } | null;
+  // The frozen acceptance tests: their folder and a digest of every file in it.
+  tests?: { dir: string; digest: string } | null;
+  // Files the job may change besides its task file; set for retro jobs.
+  scope?: string[] | null;
+  pr: string | null;
+  costUsd: number;
+  created: string;
+  updated: string;
+}
 
 // Factory jobs, logs and worktrees live outside the repository and outside the team
 // workspace, whose files the guard treats by writer prefix.
@@ -180,6 +228,28 @@ export function recordEvent(root: string, id: string, event: string, data: objec
 
 export const jobFile = (root: string, id: string, name: string) =>
   join(jobDirectory(root, id), name);
+
+// The job's event log as recordEvent wrote it; a torn last line is skipped.
+export interface JobEvent {
+  at: string;
+  event: string;
+  [key: string]: unknown;
+}
+
+export function jobEvents(root: string, id: string): JobEvent[] {
+  const file = jobFile(root, id, 'events.jsonl');
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as JobEvent];
+      } catch {
+        return [];
+      }
+    });
+}
 
 const alive = (pid: number) => {
   try {

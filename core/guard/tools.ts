@@ -15,7 +15,7 @@ import {
   readText,
   singleLink,
 } from '../project.ts';
-import { workspaceRoot } from '../flow-config.ts';
+import { workspaceRoot } from '../config/paths.ts';
 import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 

@@ -18,7 +18,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fingerprint, sessionKey } from '../core/state.ts';
-import { handle, runGate } from '../core/runtime.ts';
+import { handle } from '../core/runtime.ts';
+import { runGate } from '../core/workflow/gate.ts';
 import { claimsDone } from '../core/workflow/status.ts';
 
 function repo(t: TestContext, config = {}) {

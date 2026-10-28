@@ -17,7 +17,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import type { HistoryProcess } from '../core/types.ts';
+import type { HistoryProcess } from '../core/workflow/clean-history.ts';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -30,7 +30,7 @@ import {
 } from '../core/workflow/clean-history.ts';
 import { skills } from '../core/context.ts';
 import { loadProject } from '../core/project.ts';
-import { pluginRoot } from '../core/runtime.ts';
+import { pluginRoot } from '../core/shared/plugin.ts';
 
 test('running harness prompt appends and new live children do not expand reviewed deletion', (t) => {
   const { put } = fixture(t);

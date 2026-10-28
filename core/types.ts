@@ -1,72 +1,6 @@
 // Shared contracts. Boundary assertions accompany the existing runtime checks.
 export const HARNESSES = ['pi', 'claude', 'codex', 'grok', 'cursor'] as const;
 export type Harness = (typeof HARNESSES)[number];
-// History cleanup and retro read transcript formats known only for these hosts.
-export type HistoryHarness = 'pi' | 'claude' | 'codex';
-
-export interface HistoryProcess {
-  pid: number;
-  comm: string;
-}
-
-export interface HistoryEntry {
-  harness: HistoryHarness | 'workflow';
-  path: string;
-  bytes: number;
-  mtimeMs: number;
-  rule: string;
-  snapshot: string;
-  appendIdentity?: { dev: number; ino: number };
-}
-
-export interface HistoryNotice {
-  path: string;
-  reason: string;
-}
-
-export interface HistoryPlan {
-  version: 1;
-  harnesses: HistoryHarness[];
-  roots: Record<HistoryHarness | 'workflow', string>;
-  entries: HistoryEntry[];
-  keptLive: HistoryNotice[];
-  deferred: HistoryNotice[];
-}
-
-export interface HistoryDigest {
-  harness: HistoryHarness;
-  project: string;
-  id: string;
-  firstTimestamp: string | null;
-  lastTimestamp: string | null;
-  promptCount: number;
-  firstPrompt: string;
-}
-
-export interface RetroCount {
-  reason: string;
-  count: number;
-}
-
-export interface RetroHarnessEvents {
-  sessions: string[];
-  denials: RetroCount[];
-  asks: RetroCount[];
-  approvals: number;
-  gatePasses: number;
-  gateFailures: RetroCount[];
-}
-
-export interface RetroEvents {
-  task: string;
-  repo: string;
-  workspace: string;
-  window: { from: string; to: string };
-  files: { name: string; bytes: number; modified: string }[];
-  reviews: { reviewer: string; round: number; verdict: string }[];
-  retroLogs: string[];
-  events: Record<HistoryHarness, RetroHarnessEvents>;
-}
 
 export type Reviewer = 'claude' | 'codex' | 'grok' | 'cursor' | 'ollama';
 
@@ -216,54 +150,6 @@ export interface ContainerConfig {
   cpus: number | null;
 }
 
-export type FactoryStage =
-  | 'awaiting-plan'
-  | 'planning'
-  | 'awaiting-approval'
-  | 'approved'
-  | 'testing'
-  | 'building'
-  | 'gating'
-  | 'reviewing'
-  | 'shipping'
-  | 'committed'
-  | 'pr-open'
-  | 'parked';
-
-export interface FactoryJob {
-  version: 1;
-  id: string;
-  repo: string;
-  title: string;
-  issue: { number: number; url: string } | null;
-  small: boolean;
-  fix: boolean;
-  author: Harness;
-  stage: FactoryStage;
-  worktree: string | null;
-  branch: string | null;
-  task: string | null;
-  // proposedAt is when the plan went to the issue; a label added before it approves nothing.
-  plan: {
-    digest: string;
-    approvedBy: string | null;
-    at: string | null;
-    proposedAt?: string | null;
-  } | null;
-  reviewer: string | null;
-  round: number;
-  fixPasses: number;
-  parked: { reason: string; detail: string; at?: string } | null;
-  // The frozen acceptance tests: their folder and a digest of every file in it.
-  tests?: { dir: string; digest: string } | null;
-  // Files the job may change besides its task file; set for retro jobs.
-  scope?: string[] | null;
-  pr: string | null;
-  costUsd: number;
-  created: string;
-  updated: string;
-}
-
 export interface TeamConfig {
   lead: Harness;
   dev: Harness;
@@ -324,8 +210,6 @@ export type Action =
   | { kind: 'files'; files: FileChange[] }
   | { kind: 'workspace'; paths: string[] }
   | { kind: 'read' | 'outside' | 'unknown' };
-
-export type ShellKind = 'read' | 'outside' | 'branch' | 'opaque' | 'mutation';
 
 export interface HookResult {
   decision?: 'deny' | 'ask';
@@ -421,79 +305,6 @@ export interface WorkflowState {
   additionalReviewAuthorization?: unknown;
 }
 
-export interface CopyPlan {
-  destination: string;
-  files: string[];
-}
-
-export interface SettingsWrite {
-  path: string;
-  content: string;
-  before: Buffer | null;
-}
-
-export interface LinkPlan {
-  path: string;
-  target: string;
-}
-
-export interface PackageStatus {
-  path: string;
-  matches: boolean;
-  expected: string;
-  actual?: string;
-  error?: string;
-}
-
-export interface InstallOptions {
-  repair?: boolean | undefined;
-}
-
-export interface InstallationPlan {
-  source: string;
-  writes: SettingsWrite[];
-  copy?: CopyPlan | null | undefined;
-  link?: LinkPlan | undefined;
-  replace?: boolean | undefined;
-}
-
-export interface ProjectInstallPlan {
-  root: string;
-  writes: SettingsWrite[];
-  link: LinkPlan | undefined;
-  copy: CopyPlan | undefined;
-  drift: PackageStatus | undefined;
-  replace: boolean;
-}
-
-export interface PackageMetadata {
-  name: string;
-  version: string;
-  files: string[];
-  description: string;
-}
-
-export interface HarnessSettings {
-  permissions?: unknown;
-  hooks?: unknown;
-  packages?: string[];
-  extraKnownMarketplaces?: Record<string, { source: { source: string; path: string } }>;
-  enabledPlugins?: Record<string, boolean>;
-}
-
-export interface MarketplacePlugin {
-  name: string;
-  source: { source: string; path: string };
-  interface?: { displayName: string; shortDescription: string };
-  policy?: { installation: string; authentication: string };
-  category?: string;
-}
-
-export interface Marketplace {
-  name: string;
-  plugins: MarketplacePlugin[];
-}
-
 export interface Skill {
   name: string;
   description: string;
@@ -505,17 +316,6 @@ export interface Skill {
 export interface Extension {
   pre?: (input: Project & { action: Action }) => unknown | Promise<unknown>;
   post?: (input: Project & { action: Action }) => string | undefined | Promise<string | undefined>;
-}
-
-export interface SetupProject {
-  path: string;
-  stacks: string[];
-  commands: { purpose: string; argv: string[]; evidence: string }[];
-}
-
-export interface PackedArchive {
-  filename: string;
-  files: { path: string; size: number; mode: number }[];
 }
 
 export interface NativeHookOutput {

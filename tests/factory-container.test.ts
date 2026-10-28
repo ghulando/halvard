@@ -17,12 +17,12 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
-import { factoryConfig } from '../core/flow-config.ts';
+import { factoryConfig } from '../core/config/factory.ts';
 import { boxCommand } from '../core/factory/container.ts';
-import { factoryCommand } from '../core/factory/pipeline.ts';
-import { jobEvents } from '../core/factory/board.ts';
+import { factoryCommand } from '../core/factory/command.ts';
+import { jobEvents } from '../core/factory/store.ts';
 import { loadJob } from '../core/factory/store.ts';
-import { pluginRoot } from '../core/runtime.ts';
+import { pluginRoot } from '../core/shared/plugin.ts';
 import { env, repo, stubs } from './factory-stubs.ts';
 
 const STUB_ENV = [

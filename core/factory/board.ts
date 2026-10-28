@@ -1,4 +1,5 @@
-import type { FactoryJob } from '../types.ts';
+import type { FactoryJob } from './store.ts';
+import type { JobEvent } from './store.ts';
 import {
   closeSync,
   existsSync,
@@ -11,29 +12,8 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { jobFile, listJobs, repoHome } from './store.ts';
+import { jobEvents, jobFile, listJobs, repoHome } from './store.ts';
 import { classRates, trackedJobs } from './outcomes.ts';
-
-interface Event {
-  at: string;
-  event: string;
-  [key: string]: unknown;
-}
-
-export function jobEvents(root: string, id: string): Event[] {
-  const file = jobFile(root, id, 'events.jsonl');
-  if (!existsSync(file)) return [];
-  return readFileSync(file, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line) as Event];
-      } catch {
-        return [];
-      }
-    });
-}
 
 // Agent spend recorded in the current calendar month (UTC), across every job.
 export function monthSpend(root: string, now = new Date()) {
@@ -230,7 +210,7 @@ function tail(file: string, bytes = 32 * 1024) {
 const read = (file: string) => (existsSync(file) ? readFileSync(file, 'utf8') : null);
 
 // One line per event; a gate's failing tail and a review's findings follow in full.
-function timelineRow(event: Event) {
+function timelineRow(event: JobEvent) {
   const { at, event: name, ...rest } = event;
   let text: string;
   let more = '';

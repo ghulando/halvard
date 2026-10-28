@@ -2,7 +2,9 @@ import type { Project, ProjectConfig } from './types.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { factoryConfig, flowConfig, personalConfig, teamConfig } from './flow-config.ts';
+import { factoryConfig } from './config/factory.ts';
+import { flowConfig, personalConfig } from './config/workflow.ts';
+import { teamConfig } from './config/team.ts';
 
 export const CONFIG = '.halvard.json';
 

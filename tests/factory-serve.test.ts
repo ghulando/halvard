@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import test from 'node:test';
-import { factoryCommand } from '../core/factory/pipeline.ts';
+import { factoryCommand } from '../core/factory/command.ts';
 import { loadJob, listJobs } from '../core/factory/store.ts';
 import { boardHtml, metrics } from '../core/factory/board.ts';
 import { env, repo, stubs } from './factory-stubs.ts';

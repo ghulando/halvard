@@ -1,6 +1,6 @@
 import type { ParsedCommand } from './types.ts';
 import { HARNESSES } from './types.ts';
-import { AUTHOR_ERROR } from './flow-config.ts';
+import { AUTHOR_ERROR } from './config/reviewers.ts';
 
 // Shared CLI grammar: the runner and hooks accept the same options and ordering.
 const commandSpecs: Record<string, { count: number; options?: string[]; required?: string[] }> = {

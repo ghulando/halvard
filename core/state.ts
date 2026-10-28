@@ -18,7 +18,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { git } from './project.ts';
-import { personalRoot } from './flow-config.ts';
+import { personalRoot } from './config/paths.ts';
 
 export const digest = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');

@@ -2,7 +2,8 @@ import type { Project, Task, TaskMetadata } from '../types.ts';
 import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, dirname, resolve } from 'node:path';
-import { AUTHOR_ERROR, authors, eligibleReviewers, workspaceRoot } from '../flow-config.ts';
+import { AUTHOR_ERROR, authors, eligibleReviewers } from '../config/reviewers.ts';
+import { workspaceRoot } from '../config/paths.ts';
 import { currentBranch, git, loadProject, projectPath, readText } from '../project.ts';
 import { privateDirectory } from '../state.ts';
 

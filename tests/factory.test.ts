@@ -1,5 +1,6 @@
 import type { TestContext } from 'node:test';
-import type { FactoryConfig, FactoryJob } from '../core/types.ts';
+import type { FactoryConfig } from '../core/types.ts';
+import type { FactoryJob } from '../core/factory/store.ts';
 import './environment.ts';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
@@ -17,9 +18,11 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { completeTask, handle, runGate } from '../core/runtime.ts';
+import { handle } from '../core/runtime.ts';
+import { completeTask } from '../core/workflow/complete.ts';
+import { runGate } from '../core/workflow/gate.ts';
 import { runReview } from '../core/workflow/review.ts';
-import { factoryConfig } from '../core/flow-config.ts';
+import { factoryConfig } from '../core/config/factory.ts';
 import { loadProject } from '../core/project.ts';
 import {
   approvedPlan,
@@ -31,9 +34,9 @@ import {
 } from '../core/workflow/tasks.ts';
 import { sessionKey } from '../core/state.ts';
 import { agentCommand, agentEnv, agentStatus } from '../core/factory/harness.ts';
-import { factoryCommand } from '../core/factory/pipeline.ts';
+import { factoryCommand } from '../core/factory/command.ts';
 import { loadJob } from '../core/factory/store.ts';
-import { jobEvents } from '../core/factory/board.ts';
+import { jobEvents } from '../core/factory/store.ts';
 import { env, repo, stubs } from './factory-stubs.ts';
 
 const bash = (root: string, command: string, extra = {}) =>

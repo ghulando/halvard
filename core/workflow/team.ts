@@ -1,7 +1,7 @@
 import type { TeamConfig } from '../types.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { teamConfig } from '../flow-config.ts';
+import { teamConfig } from '../config/team.ts';
 import { CONFIG, findRoot, loadProject } from '../project.ts';
 
 export function showTeam(cwd: string) {

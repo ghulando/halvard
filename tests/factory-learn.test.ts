@@ -1,5 +1,5 @@
 import type { TestContext } from 'node:test';
-import type { FactoryJob } from '../core/types.ts';
+import type { FactoryJob } from '../core/factory/store.ts';
 import './environment.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -16,13 +16,21 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { factoryConfig } from '../core/flow-config.ts';
-import { factoryCommand, sampled } from '../core/factory/pipeline.ts';
-import { jobEvents, metrics } from '../core/factory/board.ts';
+import { factoryConfig } from '../core/config/factory.ts';
+import { factoryCommand } from '../core/factory/command.ts';
+import { sampled } from '../core/factory/checks.ts';
+import { metrics } from '../core/factory/board.ts';
 import { changeClass, ciState } from '../core/factory/outcomes.ts';
 import { changedFiles } from '../core/factory/ship.ts';
-import { createJob, jobFile, loadJob, recordEvent, repoHome } from '../core/factory/store.ts';
-import { pluginRoot } from '../core/runtime.ts';
+import {
+  createJob,
+  jobEvents,
+  jobFile,
+  loadJob,
+  recordEvent,
+  repoHome,
+} from '../core/factory/store.ts';
+import { pluginRoot } from '../core/shared/plugin.ts';
 import { commit, env, repo, stubs } from './factory-stubs.ts';
 
 const DAY = 24 * 3600 * 1000;

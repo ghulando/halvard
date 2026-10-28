@@ -1,11 +1,3 @@
-import type {
-  HistoryHarness,
-  HistoryDigest,
-  HistoryEntry,
-  HistoryNotice,
-  HistoryPlan,
-  HistoryProcess,
-} from '../types.ts';
 import { randomUUID, createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
@@ -20,8 +12,51 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
-import { personalRoot, workspaceRoot } from '../flow-config.ts';
+import { personalRoot, workspaceRoot } from '../config/paths.ts';
 import { privateDirectory } from '../state.ts';
+import { driver } from '../harnesses/index.ts';
+
+// History cleanup and retro read transcript formats known only for these hosts.
+export type HistoryHarness = 'pi' | 'claude' | 'codex';
+
+export interface HistoryProcess {
+  pid: number;
+  comm: string;
+}
+
+export interface HistoryEntry {
+  harness: HistoryHarness | 'workflow';
+  path: string;
+  bytes: number;
+  mtimeMs: number;
+  rule: string;
+  snapshot: string;
+  appendIdentity?: { dev: number; ino: number };
+}
+
+export interface HistoryNotice {
+  path: string;
+  reason: string;
+}
+
+export interface HistoryPlan {
+  version: 1;
+  harnesses: HistoryHarness[];
+  roots: Record<HistoryHarness | 'workflow', string>;
+  entries: HistoryEntry[];
+  keptLive: HistoryNotice[];
+  deferred: HistoryNotice[];
+}
+
+export interface HistoryDigest {
+  harness: HistoryHarness;
+  project: string;
+  id: string;
+  firstTimestamp: string | null;
+  lastTimestamp: string | null;
+  promptCount: number;
+  firstPrompt: string;
+}
 
 const harnessNames: HistoryHarness[] = ['claude', 'pi', 'codex'];
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -118,11 +153,14 @@ export function historyHarnesses(value: string): HistoryHarness[] {
   return harnessNames.filter((name) => selected.includes(name));
 }
 
+// Each tool's driver knows where it keeps its history.
+const history = (name: HistoryHarness) => driver(name)!.history!;
+
 function roots(): HistoryPlan['roots'] {
   return {
-    claude: resolve(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')),
-    pi: resolve(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi/agent')),
-    codex: resolve(process.env.CODEX_HOME || join(homedir(), '.codex')),
+    claude: history('claude').root(),
+    pi: history('pi').root(),
+    codex: history('codex').root(),
     workflow: workspaceRoot(),
   };
 }
@@ -768,13 +806,9 @@ export function transcriptFiles(harnesses: HistoryHarness[]) {
     if (stat(root[harness])?.isSymbolicLink()) {
       throw new Error(`History root is a symlink: ${root[harness]}`);
     }
-    const transcripts = (
-      harness === 'claude'
-        ? ['projects']
-        : harness === 'pi'
-          ? ['sessions']
-          : ['sessions', 'archived_sessions']
-    ).flatMap((part) => files(join(root[harness], part)));
+    const transcripts = history(harness).transcripts.flatMap((part) =>
+      files(join(root[harness], part)),
+    );
     const sources = [
       ...transcripts,
       ...['history.jsonl']

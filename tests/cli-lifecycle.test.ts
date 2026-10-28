@@ -1,5 +1,6 @@
 import type { TestContext } from 'node:test';
-import type { ReviewRecord, RunningReview, PackageMetadata } from '../core/types.ts';
+import type { ReviewRecord, RunningReview } from '../core/types.ts';
+import type { PackageMetadata } from '../core/install/types.ts';
 import './environment.ts';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -22,7 +23,8 @@ import { basename, join } from 'node:path';
 import test from 'node:test';
 import { parseCommand } from '../core/cli.ts';
 import { doctor } from '../core/setup/doctor.ts';
-import { handle, pluginRoot, quote } from '../core/runtime.ts';
+import { handle } from '../core/runtime.ts';
+import { pluginRoot, quote } from '../core/shared/plugin.ts';
 import { recoverReview, reviewKey } from '../core/workflow/review.ts';
 import {
   handoffTask,

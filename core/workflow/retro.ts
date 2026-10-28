@@ -1,10 +1,37 @@
-import type { HistoryHarness, RetroCount, RetroEvents, RetroHarnessEvents } from '../types.ts';
+import type { HistoryHarness } from './clean-history.ts';
 import { createReadStream, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { transcriptFiles } from './clean-history.ts';
-import { workspaceRoot } from '../flow-config.ts';
+import { workspaceRoot } from '../config/paths.ts';
 import { inside, loadProject } from '../project.ts';
+import { driver } from '../harnesses/index.ts';
+import { object } from '../harnesses/transcript.ts';
+
+export interface RetroCount {
+  reason: string;
+  count: number;
+}
+
+export interface RetroHarnessEvents {
+  sessions: string[];
+  denials: RetroCount[];
+  asks: RetroCount[];
+  approvals: number;
+  gatePasses: number;
+  gateFailures: RetroCount[];
+}
+
+export interface RetroEvents {
+  task: string;
+  repo: string;
+  workspace: string;
+  window: { from: string; to: string };
+  files: { name: string; bytes: number; modified: string }[];
+  reviews: { reviewer: string; round: number; verdict: string }[];
+  retroLogs: string[];
+  events: Record<HistoryHarness, RetroHarnessEvents>;
+}
 
 const harnesses: HistoryHarness[] = ['claude', 'codex', 'pi'];
 // The workspace marker is written at task-start and the last report near done.
@@ -21,151 +48,6 @@ const GATE_REASONS = [
   'source tree changed during checks',
   'overlapped a guarded mutation or unclassified tool',
 ];
-// Each harness reports a hook denial in its own shape; reason text elsewhere is not a denial.
-const CLAUDE_DENIAL = /^PreToolUse:[\w.-]+ hook error: ([\s\S]*)$/;
-const CODEX_DENIAL = 'Command blocked by PreToolUse hook: ';
-const CODEX_SCRIPT_ERROR = `Script error:\n${CODEX_DENIAL}`;
-const PI_DENIAL = 'halvard blocked: ';
-
-interface Item {
-  cwd?: unknown;
-  time?: unknown;
-  prompts: string[];
-  results: { texts: string[]; denials: string[] }[];
-}
-
-const object = (value: unknown): Record<string, unknown> =>
-  value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-
-function texts(value: unknown): string[] {
-  if (typeof value === 'string') return [value];
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((block) => {
-    const text = object(block).text;
-    return typeof text === 'string' ? [text] : [];
-  });
-}
-
-// Codex code-mode output nests command results inside JSON strings. A rejected entry
-// holds the blocked command, which never ran, so its text is not command output.
-function unwrap(text: string, depth = 0): string[] {
-  if (depth > 3 || !/^\s*[[{]/.test(text)) return [text];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return [text];
-  }
-  const leaves: string[] = [];
-  const walk = (value: unknown) => {
-    if (typeof value === 'string') {
-      leaves.push(...unwrap(value, depth + 1));
-    } else if (value && typeof value === 'object' && object(value).status !== 'rejected') {
-      Object.values(value).forEach(walk);
-    }
-  };
-  walk(parsed);
-  return leaves;
-}
-
-function claudeItem(record: Record<string, unknown>): Item {
-  const item: Item = { cwd: record.cwd, time: record.timestamp, prompts: [], results: [] };
-  if (record.type !== 'user' || record.isMeta) return item;
-  const content = object(record.message).content;
-  if (typeof content === 'string') item.prompts.push(content);
-  if (!Array.isArray(content)) return item;
-  for (const block of content.map(object)) {
-    if (block.type === 'tool_result') {
-      const output = texts(block.content);
-      item.results.push({
-        texts: output,
-        denials:
-          block.is_error === true
-            ? output.flatMap((text) => text.match(CLAUDE_DENIAL)?.slice(1) ?? [])
-            : [],
-      });
-    } else if (block.type === 'text' && typeof block.text === 'string') {
-      item.prompts.push(block.text);
-    }
-  }
-  return item;
-}
-
-// Codex rejects a call as a script error block or as a rejected entry at the top of its
-// result envelope, alone or in a parallel-call array. Nothing below that is searched,
-// since command output can hold any value. Codex appends the blocked command, which
-// can carry anything the agent typed.
-function codexDenials(text: string): string[] {
-  const reason = (value: string) => value.slice(CODEX_DENIAL.length).split(/\.? Command: /)[0]!;
-  if (text.startsWith(CODEX_SCRIPT_ERROR)) return [reason(text.slice('Script error:\n'.length))];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return [];
-  }
-  return (Array.isArray(parsed) ? parsed : [parsed])
-    .map(object)
-    .flatMap((entry) =>
-      entry.status === 'rejected' &&
-      typeof entry.reason === 'string' &&
-      entry.reason.startsWith(CODEX_DENIAL)
-        ? [reason(entry.reason)]
-        : [],
-    );
-}
-
-function codexItem(record: Record<string, unknown>): Item {
-  const payload = object(record.payload);
-  const item: Item = { time: record.timestamp, prompts: [], results: [] };
-  if (['session_meta', 'turn_context'].includes(record.type as string)) item.cwd = payload.cwd;
-  if (
-    record.type === 'event_msg' &&
-    payload.type === 'user_message' &&
-    typeof payload.message === 'string'
-  ) {
-    item.prompts.push(payload.message);
-  }
-  if (
-    record.type === 'response_item' &&
-    ['function_call_output', 'custom_tool_call_output'].includes(payload.type as string)
-  ) {
-    const output = texts(payload.output);
-    item.results.push({
-      texts: output
-        .filter((text) => !text.startsWith(CODEX_SCRIPT_ERROR))
-        .flatMap((text) => unwrap(text)),
-      denials: output.flatMap(codexDenials),
-    });
-  }
-  return item;
-}
-
-function piItem(record: Record<string, unknown>): Item {
-  const message = object(record.message);
-  const item: Item = { time: record.timestamp, prompts: [], results: [] };
-  if (record.type === 'session') item.cwd = record.cwd;
-  if (record.type !== 'message') return item;
-  if (message.role === 'user') item.prompts.push(...texts(message.content));
-  if (message.role === 'toolResult') {
-    const output = texts(message.content);
-    item.results.push({
-      texts: output,
-      denials:
-        message.isError === true
-          ? output
-              .filter((text) => text.startsWith(PI_DENIAL))
-              .map((text) => text.slice(PI_DENIAL.length))
-          : [],
-    });
-  }
-  return item;
-}
-
-const parsers = { claude: claudeItem, codex: codexItem, pi: piItem };
-
 function add(counts: RetroCount[], reason: string) {
   const existing = counts.find((entry) => entry.reason === reason);
   if (existing) {
@@ -250,7 +132,7 @@ export async function retroEvents(cwd: string, id: string): Promise<RetroEvents>
       if (harness === 'claude' && typeof record.sessionId === 'string') session = record.sessionId;
       if (record.type === 'session' && typeof record.id === 'string') session = record.id;
       if (record.type === 'session_meta' && typeof payload.id === 'string') session = payload.id;
-      const item = parsers[harness](record);
+      const item = driver(harness)!.history!.item(record);
       if (typeof item.cwd === 'string') location = item.cwd;
       const time = timestamp(item.time);
       if (typeof location !== 'string' || !inRepo(root, location)) continue;

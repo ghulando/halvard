@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { parseCommand } from '../core/cli.ts';
 import { readFileSync } from 'node:fs';
-import { approveFromTerminal, runGate } from '../core/runtime.ts';
+import { approveFromTerminal } from '../core/runtime.ts';
+import { runGate } from '../core/workflow/gate.ts';
 
 const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
   install-plan <repo> [--repair]    Preview project installation
@@ -49,7 +50,7 @@ try {
     process.stdout.write(help);
   } else if (command === 'factory') {
     // The factory has its own subcommand grammar.
-    const { factoryCommand } = await import('../core/factory/pipeline.ts');
+    const { factoryCommand } = await import('../core/factory/command.ts');
     await factoryCommand(process.cwd(), args);
   } else {
     const { positional, flags } = parseCommand(command, args);
@@ -157,7 +158,7 @@ try {
         break;
       }
       case 'task-done': {
-        const { completeTask } = await import('../core/runtime.ts');
+        const { completeTask } = await import('../core/workflow/complete.ts');
         // A runner passes the approved plan's digest it holds, or none for a task without one.
         const plan = flags.plan as string | undefined;
         if (plan !== undefined && plan !== 'none' && !/^[a-f0-9]{64}$/.test(plan)) {

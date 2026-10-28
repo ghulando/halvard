@@ -1,21 +1,16 @@
 import type { FactoryConfig, Harness } from '../types.ts';
+import type { Stage } from '../harnesses/types.ts';
 import { spawn } from 'node:child_process';
-import {
-  closeSync,
-  mkdtempSync,
-  openSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-  writeSync,
-} from 'node:fs';
+import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MODEL_KEY_NAMES } from '../flow-config.ts';
-import { pluginRoot } from '../runtime.ts';
-import { hostResult } from '../workflow/review.ts';
+import { MODEL_KEY_NAMES } from '../config/container.ts';
+import { driver } from '../harnesses/index.ts';
 
-export type Stage = 'plan' | 'build';
+export type { Stage } from '../harnesses/types.ts';
+
+// Every author harness can run headless.
+const agentDriver = (harness: Harness) => driver(harness)!.agent!;
 
 // Everything a runner started that must not outlive it: agent and child process groups and
 // their containers. An exit, including the second Ctrl-C, ends them all.
@@ -112,70 +107,16 @@ export function agentCommand(
     config: FactoryConfig;
   },
 ) {
-  const extra = config.harnessArgs[harness] ?? [];
-  const auth = config.auth[harness] ?? 'subscription';
-  if (harness === 'claude') {
-    return [
-      'claude',
-      '-p',
-      '--output-format',
-      'json',
-      '--permission-prompts',
-      'none',
-      '--max-budget-usd',
-      budgetUsd.toFixed(2),
-      // Bare mode loads only Halvard and reads only an API key; a subscription token
-      // needs the normal startup, which also loads the user's own Claude settings.
-      ...(auth === 'api' ? ['--bare', '--plugin-dir', pluginRoot] : []),
-      ...(stage === 'plan'
-        ? ['--permission-mode', 'dontAsk', '--allowedTools', 'Read,Grep,Glob,Bash']
-        : ['--permission-mode', 'acceptEdits', '--allowedTools', 'Bash,Read,Edit,Write,Glob,Grep']),
-      // --add-dir and --allowedTools take lists and would swallow a trailing prompt, so
-      // Claude reads it on stdin.
-      '--add-dir',
-      workspace,
-      ...extra,
-    ];
-  }
-  if (harness === 'grok') {
-    // Grok's headless mode reads the prompt from a file, not stdin.
-    return [
-      'grok',
-      '--prompt-file',
-      promptFile,
-      '--output-format',
-      'json',
-      '--no-auto-update',
-      ...extra,
-    ];
-  }
-  if (harness === 'cursor') {
-    return [
-      'cursor-agent',
-      '-p',
-      '--output-format',
-      'json',
-      ...(stage === 'plan' ? ['--mode', 'ask'] : ['--force']),
-      ...extra,
-      prompt,
-    ];
-  }
-  if (harness === 'codex') {
-    return [
-      'codex',
-      'exec',
-      '--sandbox',
-      stage === 'plan' ? 'read-only' : 'workspace-write',
-      '--skip-git-repo-check',
-      '--color',
-      'never',
-      '-o',
-      output,
-      ...extra,
-      '-',
-    ];
-  }
-  return ['pi', '-p', ...extra, `@${promptFile}`];
+  return agentDriver(harness).command({
+    stage,
+    prompt,
+    promptFile,
+    output,
+    workspace,
+    budgetUsd,
+    auth: config.auth[harness] ?? 'subscription',
+    extra: config.harnessArgs[harness] ?? [],
+  });
 }
 
 export interface AgentResult {
@@ -188,27 +129,7 @@ export interface AgentResult {
 
 // The final message and the reported cost. Hosts other than Claude report no dollars.
 export function agentResult(harness: Harness, stdout: string, output: string) {
-  if (harness === 'claude') {
-    const envelope = JSON.parse(stdout) as {
-      result?: unknown;
-      is_error?: unknown;
-      total_cost_usd?: unknown;
-    };
-    const costUsd = typeof envelope.total_cost_usd === 'number' ? envelope.total_cost_usd : 0;
-    if (envelope.is_error || typeof envelope.result !== 'string') {
-      return { text: '', costUsd, error: `Claude reported an error: ${String(envelope.result)}` };
-    }
-    return { text: envelope.result, costUsd, error: null };
-  }
-  if (harness === 'grok' || harness === 'cursor') {
-    try {
-      return { text: hostResult(harness, stdout), costUsd: 0, error: null };
-    } catch (err) {
-      return { text: '', costUsd: 0, error: (err as Error).message };
-    }
-  }
-  if (harness === 'codex') return { text: readFileSync(output, 'utf8'), costUsd: 0, error: null };
-  return { text: stdout, costUsd: 0, error: null };
+  return agentDriver(harness).result(stdout, output);
 }
 
 // Runs one agent in its own process group, kills the group at the deadline, and logs
@@ -317,7 +238,7 @@ export function runAgent(
     });
     child.stderr.on('data', (data: Buffer) => writeSync(fd, data));
     child.stdin.on('error', () => {});
-    child.stdin.end(harness === 'codex' || harness === 'claude' ? prompt : '');
+    child.stdin.end(agentDriver(harness).stdin ? prompt : '');
     child.on('error', (error) =>
       finish({ text: '', costUsd: 0, exitCode: null, timedOut, error: error.message }),
     );

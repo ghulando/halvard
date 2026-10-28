@@ -1,5 +1,5 @@
-import type { FactoryJob } from '../types.ts';
-import type { Context } from './pipeline.ts';
+import type { FactoryJob } from './store.ts';
+import type { Context } from './context.ts';
 import { gh } from './ship.ts';
 import { jobId } from './store.ts';
 

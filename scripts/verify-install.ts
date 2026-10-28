@@ -1,9 +1,5 @@
-import type {
-  PackedArchive,
-  PackageMetadata,
-  HarnessSettings,
-  Marketplace,
-} from '../core/types.ts';
+import type { PackedArchive, PackageMetadata } from '../core/install/types.ts';
+import type { HarnessSettings, Marketplace } from '../core/harnesses/types.ts';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, readdirSync, existsSync } from 'node:fs';

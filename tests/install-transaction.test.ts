@@ -1,5 +1,5 @@
 import type { TestContext } from 'node:test';
-import type { PackageMetadata } from '../core/types.ts';
+import type { PackageMetadata } from '../core/install/types.ts';
 import './environment.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

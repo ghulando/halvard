@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { handle } from '../core/runtime.ts';
-import { hookOutput } from '../adapters/hooks.ts';
-import { hostHarness, toHookPayload } from '../adapters/payload.ts';
+import { hookOutput, hostHarness, toHookPayload } from '../core/harnesses/index.ts';
 
 try {
   let raw = '';

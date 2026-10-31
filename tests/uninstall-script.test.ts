@@ -242,7 +242,7 @@ test('uninstall script removes Halvard from Grok and Cursor and keeps the rest',
   const grok = result.calls.filter((call) => call.startsWith('grok'));
   assert.deepEqual(grok, [
     'grok plugin uninstall halvard --confirm',
-    'grok plugin marketplace remove ghulando/halvard',
+    'grok plugin marketplace remove ghulando',
   ]);
   const { home } = result;
   assert.deepEqual(JSON.parse(readFileSync(join(home, '.cursor/hooks.json'), 'utf8')), {
@@ -253,4 +253,60 @@ test('uninstall script removes Halvard from Grok and Cursor and keeps the rest',
   assert.ok(!existsSync(join(home, '.cursor/skills/halvard')));
   assert.ok(existsSync(join(home, '.cursor/skills/mine')));
   assert.ok(!existsSync(join(home, '.config/halvard/cursor')));
+});
+
+test('uninstall script treats a Grok marketplace that is already gone as removed', (t) => {
+  const missing =
+    'Error: Marketplace source "ghulando" not found. Configured sources: xAI Official\n';
+  const result = runScript(
+    t,
+    'uninstall.sh',
+    {
+      ...installed,
+      'grok-plugin-list---json': '[]',
+      'grok-plugin-marketplace-remove-ghulando': missing,
+      'grok-plugin-marketplace-remove-ghulando.fail': '',
+      'grok-plugin-marketplace-remove-ghulando_halvard': missing,
+      'grok-plugin-marketplace-remove-ghulando_halvard.fail': '',
+    },
+    { extra: ['grok'], prepare },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /■ Grok\n {2}- no Halvard install found\n/);
+  assert.doesNotMatch(result.stdout + result.stderr, /Error:/);
+});
+
+test('uninstall script removes the Grok marketplace by repository when Grok wants that', (t) => {
+  const result = runScript(
+    t,
+    'uninstall.sh',
+    {
+      ...installed,
+      'grok-plugin-list---json': '[]',
+      'grok-plugin-marketplace-remove-ghulando': 'Error: expected owner/repo\n',
+      'grok-plugin-marketplace-remove-ghulando.fail': '',
+    },
+    { extra: ['grok'], prepare },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(
+    result.calls.filter((call) => call.startsWith('grok')),
+    ['grok plugin marketplace remove ghulando', 'grok plugin marketplace remove ghulando/halvard'],
+  );
+  assert.match(result.stdout, /■ Grok\n {2}✓ removed the ghulando marketplace\n/);
+});
+
+test('uninstall script reports one line per step and hides harness output', (t) => {
+  const result = run(t, {
+    ...installed,
+    'pi-remove-git:github.com_ghulando_halvard': 'Removing...\n',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /■ Claude Code\n {2}✓ uninstalled halvard@ghulando\n/);
+  assert.match(result.stdout, /■ Pi\n {2}✓ removed git:github\.com\/ghulando\/halvard\n/);
+  assert.match(result.stdout, /■ Grok\n {2}- not on PATH, skipped\n/);
+  assert.doesNotMatch(result.stdout, /Removing\.\.\./);
+  const verbose = run(t, installed, ['--verbose', '--purge']);
+  assert.equal(verbose.status, 0, verbose.stderr);
+  assert.match(verbose.stdout, /\$ pi remove git:github\.com\/ghulando\/halvard/);
 });

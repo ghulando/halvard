@@ -1,6 +1,7 @@
 import type { TestContext } from 'node:test';
 import type { Fixtures } from './script-stubs.ts';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
@@ -225,4 +226,144 @@ test('install script merges Cursor hooks, keeps other entries and links the skil
   // A skill directory of the user's own is kept.
   assert.equal(lstatSync(join(cursorDir, 'skills/halvard-spec')).isDirectory(), true);
   assert.match(result.stdout, /kept your own .*halvard-spec/);
+});
+
+// util-linux script supplies the terminal the Grok question needs; other systems skip.
+const terminal = spawnSync('script', ['--version'], { encoding: 'utf8' }).stdout?.includes(
+  'util-linux',
+)
+  ? false
+  : 'needs util-linux script';
+const grokFresh = { ...empty, 'grok-plugin-list---json': '[]' };
+const marketplaceRefused = {
+  'grok-plugin-install-halvard---trust': 'Error: No marketplace plugin named "halvard"\n',
+  'grok-plugin-install-halvard---trust.fail': '',
+};
+
+test(
+  'install script installs Grok on a yes, from GitHub when the marketplace refuses',
+  { skip: terminal },
+  (t) => {
+    const result = runScript(
+      t,
+      'install.sh',
+      { ...grokFresh, ...marketplaceRefused },
+      {
+        extra: ['grok'],
+        terminal: 'y\n',
+        env: { NO_COLOR: '1' },
+      },
+    );
+    assert.equal(result.status, 0, result.stdout);
+    assert.deepEqual(
+      result.calls.filter((call) => call.startsWith('grok')),
+      [
+        'grok plugin marketplace update ghulando',
+        'grok plugin install halvard --trust',
+        'grok plugin install ghulando/halvard --trust',
+      ],
+    );
+    assert.match(
+      result.stdout,
+      /Grok refused the ghulando marketplace: Error: No marketplace plugin named "halvard"/,
+    );
+    assert.match(
+      result.stdout,
+      /✓ installed halvard from github\.com\/ghulando\/halvard, hooks trusted/,
+    );
+    assert.match(result.stdout, /Grok\s+installed/);
+  },
+);
+
+test(
+  'install script installs Grok from a local clone when GitHub refuses too',
+  { skip: terminal },
+  (t) => {
+    const result = runScript(
+      t,
+      'install.sh',
+      {
+        ...grokFresh,
+        ...marketplaceRefused,
+        'grok-plugin-install-ghulando_halvard---trust': 'Error: unsupported source\n',
+        'grok-plugin-install-ghulando_halvard---trust.fail': '',
+      },
+      { extra: ['grok', 'git'], terminal: 'yes\n', env: { NO_COLOR: '1' } },
+    );
+    assert.equal(result.status, 0, result.stdout);
+    const root = join(result.home, '.config/halvard/grok');
+    assert.deepEqual(result.calls.slice(-2), [
+      `git clone --quiet --depth 1 https://github.com/ghulando/halvard.git ${root}`,
+      `grok plugin install ${root} --trust`,
+    ]);
+    assert.match(result.stdout, /installed halvard from ~\/\.config\/halvard\/grok, hooks trusted/);
+  },
+);
+
+test('install script leaves Grok alone when the user answers no', { skip: terminal }, (t) => {
+  const result = runScript(t, 'install.sh', grokFresh, {
+    extra: ['grok'],
+    terminal: '\n',
+    env: { NO_COLOR: '1' },
+  });
+  assert.equal(result.status, 0, result.stdout);
+  assert.deepEqual(
+    result.calls.filter((call) => call.startsWith('grok')),
+    ['grok plugin marketplace update ghulando'],
+  );
+  assert.match(result.stdout, /Grok\s+not installed: waiting for your yes/);
+});
+
+test('install script reports each harness on its own and skips the missing ones', (t) => {
+  const result = run(t, lists([], [], [], [], 'User packages:\n'));
+  assert.equal(result.status, 0, result.stderr);
+  // No terminal, so no colors and no questions.
+  assert.doesNotMatch(result.stdout, /\x1b\[/);
+  assert.match(
+    result.stdout,
+    /■ Claude Code\n {2}✓ added the ghulando marketplace from github\.com\/ghulando\/halvard\n {2}✓ installed halvard@ghulando for your user\n/,
+  );
+  assert.match(result.stdout, /■ Grok\n {2}- not on PATH, skipped\n/);
+  assert.match(
+    result.stdout,
+    /Summary\n {2}Claude Code +installed\n {2}Codex +installed\n {2}Pi +installed\n {2}Grok +skipped, not on PATH\n {2}Cursor +skipped, not on PATH\n/,
+  );
+  // The harness CLIs' own output stays hidden while the steps succeed.
+  assert.doesNotMatch(result.stdout, /\$ claude/);
+});
+
+test('install script shows the output of a failing step and stops there', (t) => {
+  const result = run(t, {
+    ...lists([], [], [], [], 'User packages:\n'),
+    'codex-plugin-add-halvard@ghulando': 'error: plugin manifest is invalid\n',
+    'codex-plugin-add-halvard@ghulando.fail': '',
+  });
+  assert.equal(result.status, 1);
+  assert.match(
+    result.stderr,
+    /✗ installed halvard@ghulando: failed \(codex plugin add halvard@ghulando\)\n {6}error: plugin manifest is invalid/,
+  );
+  assert.match(result.stderr, /Stopped\. Harnesses above this one are done/);
+  assert.ok(!result.calls.some((call) => call.startsWith('pi ')));
+});
+
+test('install script prints each command and its output with --verbose', (t) => {
+  const result = runScript(
+    t,
+    'install.sh',
+    {
+      ...lists([], [], [], [], 'User packages:\n'),
+      'pi-install-git:github.com_ghulando_halvard': 'Cloning into halvard...\n',
+    },
+    { args: ['--verbose'] },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /\$ claude plugin marketplace add ghulando\/halvard/);
+  assert.match(
+    result.stdout,
+    /\$ pi install git:github\.com\/ghulando\/halvard\n {6}Cloning into halvard\.\.\./,
+  );
+  const bad = runScript(t, 'install.sh', empty, { args: ['--force'] });
+  assert.equal(bad.status, 2);
+  assert.deepEqual(bad.calls, []);
 });

@@ -228,14 +228,10 @@ fi
 grok_plugins='(Array.isArray(j) ? j : j.plugins ?? j.installed)'
 grok_root=$halvard_home/grok
 
-# Installs from the marketplace, then straight from GitHub, then from a local clone,
-# reporting why each earlier source was refused.
+# Grok does not install Halvard from the ghulando marketplace, which it reads from
+# Claude Code's settings, so it installs straight from GitHub, or from a local clone
+# when Grok refuses that, saying why.
 grok_install() {
-  if quietly grok plugin install "$plugin" --trust; then
-    ok "installed $plugin from the $market marketplace, hooks trusted"
-    return
-  fi
-  note "Grok refused the $market marketplace: $(sed -n 1p "$out")"
   if quietly grok plugin install "$repo" --trust; then
     ok "installed $plugin from github.com/$repo, hooks trusted"
     return
@@ -249,11 +245,6 @@ section "$c_grok" "Grok"
 if command -v grok > /dev/null; then
   plugins=$(listing grok plugin list --json)
   expect "$plugins" "Array.isArray($grok_plugins) && $grok_plugins.every((p) => typeof (p?.name ?? p?.id) === 'string')" "grok plugin list"
-  if quietly grok plugin marketplace update "$market"; then
-    ok "refreshed the $market marketplace"
-  else
-    step "added the $market marketplace from github.com/$repo" grok plugin marketplace add "$repo"
-  fi
   if has "$plugins" "$grok_plugins.some((p) => (p.name ?? p.id) === '$plugin' || (p.name ?? p.id) === '$plugin@$market')"; then
     # An install from the local clone updates from that clone.
     if [ -d "$grok_root/.git" ]; then clone_or_pull "$grok_root" "the Grok update"; fi
@@ -370,5 +361,5 @@ if [ -n "$missing" ]; then
   printf '%s\n%s\n' "Team runs need the task workspace writable. Add:" "$missing"
 fi
 if [ "$r_grok" = waiting ]; then
-  printf '%s\n  %s\n' "To install Halvard in Grok, run this script in a terminal and answer yes, or run:" "grok plugin install $plugin --trust"
+  printf '%s\n  %s\n' "To install Halvard in Grok, run this script in a terminal and answer yes, or run:" "grok plugin install $repo --trust"
 fi

@@ -50,11 +50,10 @@ Pi needs no marketplace. It loads the package's extension and skills directly.
 ### Grok
 
 ```sh
-grok plugin marketplace add ghulando/halvard
-grok plugin install halvard --trust
+grok plugin install ghulando/halvard --trust
 ```
 
-Grok reads the same marketplace. `--trust` grants the plugin's hooks trust, so the install script asks before it installs Halvard in Grok. Answer yes and it installs from the marketplace; when Grok refuses that, it installs straight from GitHub (`grok plugin install ghulando/halvard --trust`), and when Grok refuses that too, from a clone in `~/.config/halvard/grok`. It says which source Grok refused and why. Without a terminal to ask on, it prints the command instead. Grok also loads Claude Code plugins and `~/.cursor/hooks.json`. Every Halvard entry it loads guards as Grok, and one approval covers all of them.
+Grok installs Halvard straight from GitHub. It lists the `ghulando` marketplace that Claude Code registers, but does not install Halvard from it. `--trust` grants the plugin's hooks trust, so the install script asks before it installs Halvard in Grok. When Grok refuses the GitHub install, the script installs from a clone in `~/.config/halvard/grok` instead and says why Grok refused. Without a terminal to ask on, it prints the command instead. Grok also loads Claude Code plugins and `~/.cursor/hooks.json`. Every Halvard entry it loads guards as Grok, and one approval covers all of them.
 
 ### Cursor
 
@@ -97,7 +96,6 @@ codex plugin add halvard@ghulando
 
 pi update --extension git:github.com/ghulando/halvard
 
-grok plugin marketplace update ghulando
 grok plugin update halvard
 ```
 

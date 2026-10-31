@@ -19,7 +19,7 @@ The install script does this for every harness it finds on your `PATH`, and runn
 curl -fsSL https://raw.githubusercontent.com/ghulando/halvard/main/scripts/install.sh | sh
 ```
 
-It also removes an install under the earlier `agent-workflow` name. Then follow "After installing". The sections below are the same steps by hand.
+It also removes an install under the earlier `agent-workflow` name. It prints one colored section per harness with one line per step, and a summary at the end. A harness's own command output stays hidden unless a step fails; then the script shows that output and stops, leaving the harnesses after it unchanged. Add `--verbose` (`... | sh -s -- --verbose`, or `HALVARD_VERBOSE=1`) to see every command and its output. Then follow "After installing". The sections below are the same steps by hand.
 
 ### Claude Code
 
@@ -54,7 +54,7 @@ grok plugin marketplace add ghulando/halvard
 grok plugin install halvard --trust
 ```
 
-Grok reads the same marketplace. `--trust` grants the plugin's hooks trust, so the install script does not run the second command for you: it prints it. Grok also loads Claude Code plugins and `~/.cursor/hooks.json`. Every Halvard entry it loads guards as Grok, and one approval covers all of them.
+Grok reads the same marketplace. `--trust` grants the plugin's hooks trust, so the install script asks before it installs Halvard in Grok. Answer yes and it installs from the marketplace; when Grok refuses that, it installs straight from GitHub (`grok plugin install ghulando/halvard --trust`), and when Grok refuses that too, from a clone in `~/.config/halvard/grok`. It says which source Grok refused and why. Without a terminal to ask on, it prints the command instead. Grok also loads Claude Code plugins and `~/.cursor/hooks.json`. Every Halvard entry it loads guards as Grok, and one approval covers all of them.
 
 ### Cursor
 
@@ -140,7 +140,7 @@ Task files created before the rename carry an `agent-workflow` marker, so start 
 curl -fsSL https://raw.githubusercontent.com/ghulando/halvard/main/scripts/uninstall.sh | sh
 ```
 
-The script runs on macOS and Linux. It removes the plugin from Claude Code, Codex, Pi and Grok, Halvard's entries and skill links from `~/.cursor`, and the earlier `agent-workflow` install under both of its marketplace names, together with its caches, the local-clone package and the workflow state in the temp directory. It also removes Codex's hook trust entries. Settings files are backed up as `<file>.halvard.bak` before they are edited. Your personal config and the task workspace stay; add `--purge` (`... | sh -s -- --purge`) to remove them as well, along with the workspace entries in `additionalDirectories` and `writable_roots`. The script lists project-scope Claude installs and leaves them alone. Restart every session afterwards.
+The script runs on macOS and Linux. It removes the plugin from Claude Code, Codex, Pi and Grok, Halvard's entries and skill links from `~/.cursor`, and the earlier `agent-workflow` install under both of its marketplace names, together with its caches, the local-clone package and the workflow state in the temp directory. It also removes Codex's hook trust entries. Settings files are backed up as `<file>.halvard.bak` before they are edited. Your personal config and the task workspace stay; add `--purge` (`... | sh -s -- --purge`) to remove them as well, along with the workspace entries in `additionalDirectories` and `writable_roots`. The script lists project-scope Claude installs and leaves them alone. Grok also lists Claude Code's marketplaces, so the `ghulando` marketplace is often gone from Grok once Claude Code's is removed; the script treats that as done. `--verbose` works as for the install script. Restart every session afterwards.
 
 ## Install from a local clone
 

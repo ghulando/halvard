@@ -16,9 +16,10 @@ import { fileURLToPath } from 'node:url';
 
 // Each stub logs its arguments and prints the fixture named after them. A .sh fixture
 // runs first, standing in for a CLI that edits its own settings; a .fail fixture exits 1.
+// The name joins the arguments with -, with each / written as _.
 const stub = `#!/bin/sh
 echo "$(basename "$0") $*" >> "$STUB_LOG"
-key=$(echo "$(basename "$0") $*" | tr ' ' '-')
+key=$(echo "$(basename "$0") $*" | tr ' /' '-_')
 [ -f "$STUB_FIXTURES/$key.sh" ] && . "$STUB_FIXTURES/$key.sh"
 [ -f "$STUB_FIXTURES/$key" ] && cat "$STUB_FIXTURES/$key"
 [ -f "$STUB_FIXTURES/$key.fail" ] && exit 1
@@ -42,7 +43,8 @@ export const lists = (
 });
 
 // Runs scripts/<name> with stub claude, codex and pi CLIs, plus any extra stubs, and a
-// throwaway HOME and TMPDIR.
+// throwaway HOME and TMPDIR. With terminal, the script runs on a pseudo-terminal through
+// util-linux script and reads terminal as typed input.
 export function runScript(
   t: TestContext,
   name: string,
@@ -51,7 +53,15 @@ export function runScript(
     args = [],
     prepare,
     extra = [],
-  }: { args?: string[]; prepare?: (home: string, tmp: string) => void; extra?: string[] } = {},
+    terminal,
+    env = {},
+  }: {
+    args?: string[];
+    prepare?: (home: string, tmp: string) => void;
+    extra?: string[];
+    terminal?: string;
+    env?: Record<string, string>;
+  } = {},
 ) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'workflow-script-')));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -71,9 +81,16 @@ export function runScript(
   const log = join(dir, 'calls.log');
   writeFileSync(log, '');
   const script = fileURLToPath(new URL(`../scripts/${name}`, import.meta.url));
-  const result = spawnSync('/bin/sh', [script, ...args], {
+  const command = ['/bin/sh', script, ...args].map((part) => `'${part}'`).join(' ');
+  const [file, argv]: [string, string[]] =
+    terminal === undefined
+      ? ['/bin/sh', [script, ...args]]
+      : ['script', ['-qec', command, '/dev/null']];
+  const result = spawnSync(file, argv, {
     encoding: 'utf8',
+    input: terminal,
     env: {
+      ...env,
       PATH: `${bin}:/usr/bin:/bin`,
       HOME: home,
       TMPDIR: tmp,

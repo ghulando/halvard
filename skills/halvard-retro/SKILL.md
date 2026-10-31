@@ -25,4 +25,4 @@ Append one entry to `<harness>-retro-log.md` in the workspace root, the director
 
 Never copy transcript text, commands, file contents, credentials or customer data into the log. Guard reasons from `retro-events` and short summaries of the user's answers are the only quoted material.
 
-Finish by showing the entry and listing the actionable findings as candidate Halvard tasks. Starting one is the user's call.
+Finish by showing the entry and listing the actionable findings as candidate Halvard tasks. For an actionable finding about a mistake agents repeat in this project, name [halvard-correct](../halvard-correct/SKILL.md) as the way to make it impossible. Starting one is the user's call.

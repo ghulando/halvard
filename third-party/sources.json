@@ -2,40 +2,40 @@
   {
     "name": "pstack",
     "repository": "https://github.com/cursor/plugins",
-    "commit": "c47b12849e43f18d5c374c7069c744cc55b0ea00",
+    "commit": "4dd1d05818d19792e7cd6e818f1667f95f7e1dbe",
     "license": "MIT",
     "files": [
       {
         "path": "pstack/skills/poteto-mode/SKILL.md",
-        "sha256": "7645c9ee27ef9798c48a84060b6df409f8593d1058c7c25cbec28dce976195f9",
+        "sha256": "ee1848c973a112026f09ba12ea7a13c1654006e7bf170d1c34bf5d5816bc439b",
         "adaptedAs": [
           "halvard"
         ]
       },
       {
         "path": "pstack/skills/how/SKILL.md",
-        "sha256": "d31805589c7f6a63a6db6c9fadebbd79fb9660682cf1654e9b2e5e1e7cd30bc0",
+        "sha256": "08a00079bb15b4258874ac3ff62d4ca7e94350ffedb521d0fd296dc9dd21904e",
         "adaptedAs": [
           "halvard-understand"
         ]
       },
       {
         "path": "pstack/skills/blast-radius/SKILL.md",
-        "sha256": "5f02db9101ccf26c20254718f0fcd5c2c7ac5d4292b0e0923d0944ac47237aff",
+        "sha256": "2e10745b97f5862323dcda3b29ca60d56b5c3c98e37020085d26b48efbe0a436",
         "adaptedAs": [
           "halvard-understand"
         ]
       },
       {
         "path": "pstack/skills/architect/SKILL.md",
-        "sha256": "691cd39f52c7b613866e6baf9ea0b05451ffa21a6a9b4102f166418b89178fde",
+        "sha256": "31f8e97a52bfa5432edd61f68ade2a8632ef0bacbc2d2a6802d7a0e6821944ac",
         "adaptedAs": [
           "halvard-design"
         ]
       },
       {
         "path": "pstack/skills/create-verification-skill/SKILL.md",
-        "sha256": "644f2551403c1bca01a2855b34611b6e7be0ce0dc5b204514c376c0f6a6e6ac4",
+        "sha256": "d353973547bf8ad8977eca645f4cd4feaed0d32f4b43d1448f906b0a76c4d694",
         "adaptedAs": [
           "halvard-verify",
           "halvard-setup"
@@ -57,9 +57,30 @@
       },
       {
         "path": "pstack/skills/principle-test-behavior-not-implementation/SKILL.md",
-        "sha256": "87e40efe4e486f7ea639d2ed1fc0abe6c93b8fd0e89a81218086909d2470a52e",
+        "sha256": "f7223698623b6a26fea49c751e466b38e6691b1f32ce841d3983e7ffbe2b74a6",
         "adaptedAs": [
           "halvard-test"
+        ]
+      },
+      {
+        "path": "pstack/skills/correct/SKILL.md",
+        "sha256": "e347045d00c967a0b831ef883cc6ac79d21329aa10b5968637df95de7febf0ba",
+        "adaptedAs": [
+          "halvard-correct"
+        ]
+      },
+      {
+        "path": "pstack/skills/benchmark-checklist/SKILL.md",
+        "sha256": "ba109e96c8f6c1c391baccf19e5d11e14370df7b3f2605e1572cd565a6c0fca0",
+        "adaptedAs": [
+          "halvard-benchmark"
+        ]
+      },
+      {
+        "path": "pstack/skills/principle-explain-the-number/SKILL.md",
+        "sha256": "3c84fbf9a7d9842abcfcd134010782b32092ac3d3fb4aaf9ed5732dca83aa58c",
+        "adaptedAs": [
+          "halvard-benchmark"
         ]
       }
     ]
@@ -67,12 +88,12 @@
   {
     "name": "mattpocock",
     "repository": "https://github.com/mattpocock/skills",
-    "commit": "d81f3a183412e71a5b1e84ca21bc1a35eea03a60",
+    "commit": "a496f5513d4a4cf889bc48e189e579f4b0bdf6aa",
     "license": "MIT",
     "files": [
       {
         "path": "skills/engineering/implement/SKILL.md",
-        "sha256": "6d3fd9e83b8f36e5213854779db49b256a457a7ebb4a503e53fa7dcff696adc3",
+        "sha256": "483bdc4ccf4ac31d86ac7beeaa0d0db80313e71e120bb8c59b3196ae5decd53d",
         "adaptedAs": [
           "halvard",
           "halvard-implement"
@@ -87,7 +108,7 @@
       },
       {
         "path": "skills/engineering/to-tickets/SKILL.md",
-        "sha256": "5c9fba69845c2519b9b35b9af42ae5142c21f8ca15ac2123dc2722002c8058ae",
+        "sha256": "56ec23c5b2782785d4e65bff9e315b6d3aeb4ef977c174a219e99489fada1995",
         "adaptedAs": [
           "halvard-spec"
         ]
@@ -101,35 +122,35 @@
       },
       {
         "path": "skills/engineering/diagnosing-bugs/SKILL.md",
-        "sha256": "9168404abda0967a5d32977e3498cd95fda6807018852f3de736a78357c82b40",
+        "sha256": "849198df88cdb65fd0d97236604c1fca7ff2f22d2f705f9724a800d0266b118d",
         "adaptedAs": [
           "halvard-debug"
         ]
       },
       {
         "path": "skills/engineering/tdd/SKILL.md",
-        "sha256": "93ea419b76e9caaf26153b828e984f7c3fb136f4caa67b14af95f32ea965a1cc",
+        "sha256": "5505d25bbaa8fc14a79e4d20163936958992a2995b7f1dd1d6197edc9ed722e0",
         "adaptedAs": [
           "halvard-test"
         ]
       },
       {
         "path": "skills/engineering/code-review/SKILL.md",
-        "sha256": "47f4e52c21694def9c7c11cbfbf891ca35eac7a93e395797515be3c8a409ae50",
+        "sha256": "9c921a8d88138a41401d8897ca1bb852088ab1b7b605cdd04edc13e3e8aab6dd",
         "adaptedAs": [
           "halvard-review"
         ]
       },
       {
         "path": "skills/productivity/handoff/SKILL.md",
-        "sha256": "7c62de979fdc7ac32fb5ddb2146156c917f80ee070d30fadc9d40343c4b6ed25",
+        "sha256": "4cbb043950dad2ffd3662ff1a5a0b51ae676004b5cae10e3787e8ee7a4ee69d3",
         "adaptedAs": [
           "halvard-handoff"
         ]
       },
       {
         "path": "skills/engineering/setup-matt-pocock-skills/SKILL.md",
-        "sha256": "9a0c21694be19fa3eefc39343355d3af7414716ba364882c7432c2f821eac3e9",
+        "sha256": "b01e05bfe8c323171275c6ceec78b12f1bd4c62dfd26c2cfe8be806d3883f1ed",
         "adaptedAs": [
           "halvard-setup"
         ]

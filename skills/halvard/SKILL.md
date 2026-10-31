@@ -9,7 +9,7 @@ Use [halvard-team](../halvard-team/SKILL.md) only when the user explicitly asks 
 
 ## Start or resume
 
-Read AGENTS.md, CLAUDE.md if present, .halvard.json and the task. Inspect the branch and existing changes. Never stash, reset, restore, clean or switch a dirty tree to manufacture a baseline.
+Read AGENTS.md, CLAUDE.md if present, .halvard.json and the task. Inspect the branch and existing changes. In your first message on a new task, restate the user's goal and the smallest change you expect to meet it, without waiting for confirmation. If the user gave an issue reference, fetch it and state its title; ask when the reference is ambiguous. If the evidence rules out the requested change, show it and stop. Never stash, reset, restore, clean or switch a dirty tree to manufacture a baseline.
 
 Substantial tasks use [halvard-spec](../halvard-spec/SKILL.md) for observable acceptance criteria and a short plan before coding. Small, clear fixes proceed directly. Use `node <plugin-root>/bin/halvard.ts task-start <id> '<title>' --author <pi|codex|claude|grok|cursor>`; add `--fix` for fixes and `--small` for small tasks. The command creates the configured branch from the configured base only on a clean tree. Preserve existing work and ask how tasks should be separated when it blocks a new branch.
 

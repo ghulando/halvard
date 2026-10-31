@@ -3,7 +3,7 @@ name: halvard-review
 description: Finish every task with a passing independent read-only review; fix once and re-review only after a blocked review. Use after project checks pass, including small fixes.
 ---
 
-Read the task and diff. Walk project invariants before handing off. Select a configured reviewer explicitly; never silently fall back to self-review.
+Read the task and diff. Walk project invariants before handing off. Search the repo for every file that documents how code should be written; `CODING_STANDARDS.md` and `CONTRIBUTING.md` must be on the list when they exist, and unchanged ones the reviewer needs go in workflow.reviewContext. Select a configured reviewer explicitly; never silently fall back to self-review.
 
 | Author | Reviewer |
 |---|---|

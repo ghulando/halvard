@@ -128,28 +128,23 @@ test('install script registers Grok and leaves hook trust to the user', (t) => {
   assert.equal(fresh.status, 0, fresh.stderr);
   assert.deepEqual(
     fresh.calls.filter((call) => call.startsWith('grok')),
-    ['grok plugin marketplace update ghulando'],
+    [],
   );
   // The plugin itself is installed only by the user, because it grants hook trust.
-  assert.match(fresh.stdout, /grok plugin install halvard --trust/);
+  assert.match(fresh.stdout, /grok plugin install ghulando\/halvard --trust/);
   const update = runScript(
     t,
     'install.sh',
     {
       ...empty,
       'grok-plugin-list---json': JSON.stringify({ plugins: [{ name: 'halvard' }] }),
-      'grok-plugin-marketplace-update-ghulando.fail': '',
     },
     { extra: ['grok'] },
   );
   assert.equal(update.status, 0, update.stderr);
   assert.deepEqual(
     update.calls.filter((call) => call.startsWith('grok')),
-    [
-      'grok plugin marketplace update ghulando',
-      'grok plugin marketplace add ghulando/halvard',
-      'grok plugin update halvard',
-    ],
+    ['grok plugin update halvard'],
   );
   assert.doesNotMatch(update.stdout, /--trust/);
 });
@@ -235,45 +230,29 @@ const terminal = spawnSync('script', ['--version'], { encoding: 'utf8' }).stdout
   ? false
   : 'needs util-linux script';
 const grokFresh = { ...empty, 'grok-plugin-list---json': '[]' };
-const marketplaceRefused = {
-  'grok-plugin-install-halvard---trust': 'Error: No marketplace plugin named "halvard"\n',
-  'grok-plugin-install-halvard---trust.fail': '',
-};
-
-test(
-  'install script installs Grok on a yes, from GitHub when the marketplace refuses',
-  { skip: terminal },
-  (t) => {
-    const result = runScript(
-      t,
-      'install.sh',
-      { ...grokFresh, ...marketplaceRefused },
-      {
-        extra: ['grok'],
-        terminal: 'y\n',
-        env: { NO_COLOR: '1' },
-      },
-    );
-    assert.equal(result.status, 0, result.stdout);
-    assert.deepEqual(
-      result.calls.filter((call) => call.startsWith('grok')),
-      [
-        'grok plugin marketplace update ghulando',
-        'grok plugin install halvard --trust',
-        'grok plugin install ghulando/halvard --trust',
-      ],
-    );
-    assert.match(
-      result.stdout,
-      /Grok refused the ghulando marketplace: Error: No marketplace plugin named "halvard"/,
-    );
-    assert.match(
-      result.stdout,
-      /✓ installed halvard from github\.com\/ghulando\/halvard, hooks trusted/,
-    );
-    assert.match(result.stdout, /Grok\s+installed/);
-  },
-);
+test('install script installs Grok from GitHub on a yes', { skip: terminal }, (t) => {
+  const result = runScript(t, 'install.sh', grokFresh, {
+    extra: ['grok'],
+    terminal: 'y\n',
+    env: { NO_COLOR: '1' },
+  });
+  assert.equal(result.status, 0, result.stdout);
+  // The ghulando marketplace is Claude Code's, which Grok does not install from.
+  assert.deepEqual(
+    result.calls.filter((call) => call.startsWith('grok')),
+    ['grok plugin install ghulando/halvard --trust'],
+  );
+  assert.match(
+    result.stdout,
+    /\[y\/N\] \S*\s*✓ installed halvard from github\.com\/ghulando\/halvard, hooks trusted/,
+  );
+  const grok = result.stdout.slice(
+    result.stdout.indexOf('■ Grok'),
+    result.stdout.indexOf('■ Cursor'),
+  );
+  assert.doesNotMatch(grok, /marketplace|refused/);
+  assert.match(result.stdout, /Grok\s+installed/);
+});
 
 test(
   'install script installs Grok from a local clone when GitHub refuses too',
@@ -284,7 +263,6 @@ test(
       'install.sh',
       {
         ...grokFresh,
-        ...marketplaceRefused,
         'grok-plugin-install-ghulando_halvard---trust': 'Error: unsupported source\n',
         'grok-plugin-install-ghulando_halvard---trust.fail': '',
       },
@@ -296,6 +274,10 @@ test(
       `git clone --quiet --depth 1 https://github.com/ghulando/halvard.git ${root}`,
       `grok plugin install ${root} --trust`,
     ]);
+    assert.match(
+      result.stdout,
+      /Grok refused github\.com\/ghulando\/halvard: Error: unsupported source/,
+    );
     assert.match(result.stdout, /installed halvard from ~\/\.config\/halvard\/grok, hooks trusted/);
   },
 );
@@ -309,7 +291,7 @@ test('install script leaves Grok alone when the user answers no', { skip: termin
   assert.equal(result.status, 0, result.stdout);
   assert.deepEqual(
     result.calls.filter((call) => call.startsWith('grok')),
-    ['grok plugin marketplace update ghulando'],
+    [],
   );
   assert.match(result.stdout, /Grok\s+not installed: waiting for your yes/);
 });

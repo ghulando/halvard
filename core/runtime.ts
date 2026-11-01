@@ -22,7 +22,7 @@ import { hasReview } from './workflow/review.ts';
 import { evaluatePolicy } from './guard/policy.ts';
 import { parseCommand } from './cli.ts';
 import { planIntact, readTask } from './workflow/tasks.ts';
-import { hasTeamTasks, teamOnBranch } from './events.ts';
+import { clearTeamMarker, hasTeamTasks, teamOnBranch } from './events.ts';
 import { assignment, providers } from './config/reviewers.ts';
 import { workspaceRoot } from './config/paths.ts';
 import { logEvent } from './workflow/log.ts';
@@ -562,6 +562,13 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
           session: key,
           ...(file ? { task: basename(file, '.md') } : {}),
         });
+        // A done team task needs no guard, and a branch made later by hand under the same
+        // name must not inherit its team.
+        if (file) {
+          try {
+            clearTeamMarker(root, basename(file, '.md'));
+          } catch {}
+        }
       }
       return {};
     }

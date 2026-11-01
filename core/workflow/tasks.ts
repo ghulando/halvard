@@ -218,7 +218,13 @@ export function startTask(
   }
   // Switch only a clean tree, directly to the requested base. No stash, reset,
   // checkout of main, or rewriting of the user's existing branch is needed.
-  git(root, ['switch', '-c', branch, base]);
+  try {
+    git(root, ['switch', '-c', branch, base]);
+  } catch (err) {
+    // No branch, so no marker: a branch made later by hand must not inherit this team.
+    if (team) clearTeamMarker(root, id);
+    throw err;
+  }
   const metadata = {
     version: 1,
     title,

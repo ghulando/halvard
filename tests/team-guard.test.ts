@@ -9,6 +9,8 @@ import test from 'node:test';
 import { handle } from '../core/runtime.ts';
 import { repoLogDirectory, teamMarkerFile, teamOnBranch } from '../core/events.ts';
 import { startTask } from '../core/workflow/tasks.ts';
+import { runGate } from '../core/workflow/gate.ts';
+import { sessionKey } from '../core/state.ts';
 
 function fixture(t: TestContext, team: object | null = defaultTeam) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'workflow-team-guard-')));
@@ -173,4 +175,38 @@ test('a marker that does not read stops the hook', async (t) => {
   startTask(root, { id: 'broken', title: 'Broken', author: 'codex', team: true });
   writeFileSync(teamMarkerFile(repoLogDirectory(root), 'broken'), 'not json');
   await assert.rejects(write(root, 'codex', 'src/a.ts'), /does not read; fix or remove it/);
+});
+
+test('a broken marker of another task does not stop work elsewhere', async (t) => {
+  const root = fixture(t);
+  startTask(root, { id: 'old', title: 'Old', author: 'codex', team: true });
+  writeFileSync(teamMarkerFile(repoLogDirectory(root), 'old'), 'not json');
+  rmSync(join(root, 'docs/tasks/old.md'));
+  execFileSync('git', ['switch', '-q', 'main'], { cwd: root });
+  startTask(root, { id: 'fresh', title: 'Fresh', author: 'codex' });
+  assert.equal((await write(root, 'claude', 'src/a.ts')).decision, undefined);
+});
+
+test('marking a team task done removes its marker', async (t) => {
+  const root = fixture(t);
+  writeFileSync(
+    join(root, '.halvard.json'),
+    JSON.stringify({
+      ...JSON.parse(readFileSync(join(root, '.halvard.json'), 'utf8')),
+      workflow: { reviewers: { claude: {}, codex: {}, grok: {} }, requireReview: false },
+    }),
+  );
+  execFileSync('git', ['commit', '-qam', 'no review', '--author', 'F <f@example.invalid>'], {
+    cwd: root,
+    env: { ...process.env, GIT_COMMITTER_NAME: 'F', GIT_COMMITTER_EMAIL: 'f@example.invalid' },
+  });
+  startTask(root, { id: 'finish', title: 'Finish', author: 'codex', team: true });
+  await runGate(root, sessionKey(root, 'claude', 'claude-session'));
+  const task = 'docs/tasks/finish.md';
+  const done = readFileSync(join(root, task), 'utf8').replace(
+    '**Status:** open.',
+    '**Status:** done.',
+  );
+  assert.equal((await write(root, 'claude', task, done)).decision, undefined);
+  assert.equal(teamOnBranch(root, 'feature/finish'), null);
 });

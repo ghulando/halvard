@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
   constants,
@@ -186,7 +186,7 @@ export function writeTeamMarker(root: string, task: string, team: TeamMarker) {
   needsCurrentRoot();
   if (!TASK_ID.test(task)) throw new Error('task id must be a short lowercase slug');
   const dir = privateDirectory(join(repoLogDirectory(root), task));
-  const next = join(dir, `.team.${process.pid}.json`);
+  const next = join(dir, `.team.${randomUUID()}.json`);
   const fd = openSync(
     next,
     constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
@@ -217,26 +217,27 @@ export function hasTeamTasks(root: string) {
 }
 
 // The team working on a branch, or null when no team task started on it. A marker that
-// does not read stops the hook, so it fails closed until the user fixes or removes it.
+// does not read stops edits only on a branch named after its task, where it may have been
+// the team's; other branches never depended on it.
 export function teamOnBranch(root: string, branch: string | null): TeamMarker | null {
   const dir = existingLogDirectory(root);
   if (!dir || !branch) return null;
+  let broken: string | null = null;
   for (const task of readdirSync(dir)) {
     const file = teamMarkerFile(dir, task);
     if (!existsSync(file)) continue;
-    if (!lstatSync(file).isFile()) throw new Error(`team marker ${file} is not a file`);
-    let value: Partial<TeamMarker>;
+    let value: Partial<TeamMarker> = {};
     try {
+      if (!lstatSync(file).isFile()) throw new Error('not a file');
       value = JSON.parse(readFileSync(file, 'utf8')) as Partial<TeamMarker>;
-    } catch {
-      throw new Error(`team marker ${file} does not read; fix or remove it`);
-    }
+    } catch {}
     if (
       typeof value.lead !== 'string' ||
       typeof value.dev !== 'string' ||
       typeof value.branch !== 'string'
     ) {
-      throw new Error(`team marker ${file} does not read; fix or remove it`);
+      if (branch === task || branch.endsWith(`/${task}`)) broken = file;
+      continue;
     }
     if (value.branch !== branch) continue;
     return {
@@ -248,6 +249,7 @@ export function teamOnBranch(root: string, branch: string | null): TeamMarker | 
       base: typeof value.base === 'string' ? value.base : '',
     };
   }
+  if (broken) throw new Error(`team marker ${broken} does not read; fix or remove it`);
   return null;
 }
 

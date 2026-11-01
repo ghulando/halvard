@@ -173,7 +173,8 @@ async function followLabels(ctx: Context, jobs: Pool, listed: FactoryJob, issue:
   }
   // A job parked for a reason the retry policy covers runs again on its own, up to its
   // count; after that it waits for a person like any other.
-  // A factory:stop label added after the job parked keeps it parked for a person.
+  // A factory:stop label added after the job parked keeps it parked for a person. When gh
+  // cannot answer, the retry goes ahead and parks again as infra if GitHub is down.
   if (
     autoRetryDue(ctx, listed) &&
     !labeledBy(ctx, issue, 'factory:stop', listed.parked?.at ?? null)

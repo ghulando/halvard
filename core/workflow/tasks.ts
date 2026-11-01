@@ -8,13 +8,14 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, dirname, resolve } from 'node:path';
 import { AUTHOR_ERROR, authors, eligibleReviewers } from '../config/reviewers.ts';
-import { makeDataDir, workspaceRoot } from '../config/paths.ts';
+import { makeDataDir, rootIsCurrent, workspaceRoot } from '../config/paths.ts';
 import { currentBranch, git, loadProject, projectPath, readText } from '../project.ts';
 import { privateDirectory } from '../state.ts';
-import { writeEvent } from '../events.ts';
+import { clearTeamMarker, writeEvent, writeTeamMarker } from '../events.ts';
 
 // The marker keeps two repositories with the same name from sharing a folder.
 export function taskWorkspace(root: string, id: string) {
@@ -189,11 +190,41 @@ export function startTask(
       'worktree has existing changes; preserve them and resolve task placement before starting a new branch',
     );
   }
+  if (team && !config.team) {
+    throw new Error('a team task needs a team in .halvard.json; run team set first');
+  }
+  if (team && !rootIsCurrent()) {
+    throw new Error(
+      "team tasks need Halvard's data in ~/.halvard; run halvard migrate in your own terminal first",
+    );
+  }
   const file = projectPath(root, root, `${config.workflow.taskDirectory}/${id}.md`);
   if (readText(root, file)) throw new Error('task file already exists');
+  // An existing branch would keep its team marker past a solo restart; refuse it first.
+  if (
+    spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { cwd: root })
+      .status === 0
+  ) {
+    throw new Error(`branch ${branch} already exists; use another task id or resume that task`);
+  }
+  // The guard reads the team from this marker, which agents cannot edit. It is written
+  // before the switch, so a team task never runs unguarded; a solo task clears one an
+  // earlier task with this id left.
+  if (team) {
+    const { lead, dev, reviewer, investigator } = config.team!;
+    writeTeamMarker(root, id, { lead, dev, reviewer, investigator, branch, base });
+  } else {
+    clearTeamMarker(root, id);
+  }
   // Switch only a clean tree, directly to the requested base. No stash, reset,
   // checkout of main, or rewriting of the user's existing branch is needed.
-  git(root, ['switch', '-c', branch, base]);
+  try {
+    git(root, ['switch', '-c', branch, base]);
+  } catch (err) {
+    // No branch, so no marker: a branch made later by hand must not inherit this team.
+    if (team) clearTeamMarker(root, id);
+    throw err;
+  }
   const metadata = {
     version: 1,
     title,

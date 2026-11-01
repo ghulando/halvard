@@ -17,6 +17,8 @@ Turn the evidence into findings. A finding is a cause, not a count: "Pi was deni
 
 Ask about one finding at a time, most frequent or most costly first, with the harness's question tool where it has one and in plain chat otherwise. State the evidence, say how many earlier retros logged the same id ("this is the third time"), and recommend one classification: guard bug, skill gap, project config gap, personal config gap or expected. Move on only when the user has classified the finding and named its target: Halvard skills, Halvard engine, project config or personal config. Push back when an answer contradicts the evidence. Treat an unclear match with an earlier finding as a question for the user, not as a repeat.
 
+Then run `node <plugin-root>/bin/halvard.ts metrics --since 30` and look at the guard's asks and denials across tasks. Raise an ask reason whose `approvedRate` is near 100% as friction, and a rule the user expected to fire that never appears; grill each like a finding.
+
 When the findings run out, ask one open question: what slowed or annoyed the user that the logs do not show. Grill the answer like a finding.
 
 ## Log

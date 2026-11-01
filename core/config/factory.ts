@@ -68,6 +68,7 @@ export function factoryConfig(input: unknown): FactoryConfig {
     'holdout',
     'autoMerge',
     'retro',
+    'retryPolicy',
   ];
   for (const key of Object.keys(value)) {
     if (!keys.includes(key)) throw new Error(`unknown factory option: ${key}`);
@@ -128,6 +129,7 @@ export function factoryConfig(input: unknown): FactoryConfig {
   ) {
     throw new Error('factory maxFixPasses must be 0..3');
   }
+  const retryPolicy = retryPolicyConfig(value.retryPolicy ?? {});
   const draft = value.draft ?? true;
   if (typeof draft !== 'boolean') throw new Error('factory draft must be true or false');
   const riskPaths = value.riskPaths ?? [];
@@ -209,6 +211,7 @@ export function factoryConfig(input: unknown): FactoryConfig {
     },
     budgetUsd,
     maxFixPasses: maxFixPasses as number,
+    retryPolicy,
     draft,
     // What a retro may change is guidance, so a person always reads it.
     riskPaths: [...new Set([...RISK_PATHS, ...(riskPaths as string[]), ...(retro?.paths ?? [])])],
@@ -340,4 +343,44 @@ function retroConfig(input: unknown): RetroConfig {
     everyDays: bounded(value.everyDays ?? 7, 'retro everyDays', 1, 90),
     paths: relativePatterns(value.paths ?? ['AGENTS.md', 'skills/**'], 'retro paths'),
   };
+}
+
+// Park reasons serve may retry on its own, and how often. A tampered tree, a human stop, a
+// change outside the job's scope or a changed plan always waits for a person.
+export const RETRYABLE = [
+  'infra',
+  'reviewer-unavailable',
+  'conflict',
+  'gate-failed',
+  'review-blocked',
+  'agent-blocked',
+  'holdout-failed',
+];
+const NEVER = ['tampered', 'stopped-by-human', 'out-of-scope', 'plan-changed'];
+// A fresh run with the same budget mostly parks again for the same reason, at full cost.
+const BUDGET = ['budget-time', 'budget-usd'];
+
+function retryPolicyConfig(input: unknown): Record<string, number> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('factory retryPolicy must map park reasons to retry counts');
+  }
+  const policy: Record<string, number> = {};
+  for (const [reason, count] of Object.entries(input)) {
+    if (NEVER.includes(reason)) {
+      throw new Error(`factory retryPolicy cannot retry ${reason}; a person decides`);
+    }
+    if (BUDGET.includes(reason)) {
+      throw new Error(
+        `factory retryPolicy cannot retry ${reason}; the same budget runs out again, so raise it instead`,
+      );
+    }
+    if (!RETRYABLE.includes(reason)) {
+      throw new Error(`factory retryPolicy has an unknown park reason: ${reason}`);
+    }
+    if (!Number.isInteger(count) || (count as number) < 0 || (count as number) > 2) {
+      throw new Error(`factory retryPolicy ${reason} must be 0..2`);
+    }
+    policy[reason] = count as number;
+  }
+  return policy;
 }

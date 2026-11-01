@@ -2,7 +2,17 @@ import type { FactoryJob } from './store.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { gh } from './ship.ts';
-import { jobFile, listJobs, loadJob, lockHolder, lockJob, lockServe, repoHome } from './store.ts';
+import {
+  jobEvents,
+  jobFile,
+  listJobs,
+  loadJob,
+  lockHolder,
+  lockJob,
+  lockServe,
+  recordEvent,
+  repoHome,
+} from './store.ts';
 import { monthSpend, writeBoard } from './board.ts';
 import { autoMerge, refreshOutcomes } from './outcomes.ts';
 import { retroDue, retroSource } from './retro.ts';
@@ -113,6 +123,17 @@ function retrySince(ctx: Context, job: FactoryJob) {
   return null;
 }
 
+// Retries the policy still allows for the reason the job parked with.
+export function autoRetryDue(ctx: Context, job: FactoryJob) {
+  const reason = job.stage === 'parked' ? job.parked?.reason : undefined;
+  const allowed = reason ? (ctx.factory.retryPolicy[reason] ?? 0) : 0;
+  if (!allowed || runnerAlive(ctx, job.id)) return false;
+  const used = jobEvents(ctx.root, job.id).filter(
+    (event) => event.event === 'auto-retry' && event.reason === reason,
+  ).length;
+  return used < allowed;
+}
+
 // A stop label parks a waiting job, a retry label restarts a parked or dead one, and an
 // approval builds. A running job checks for the stop label itself at its next step. False
 // when the pass must end.
@@ -141,6 +162,30 @@ async function followLabels(ctx: Context, jobs: Pool, listed: FactoryJob, issue:
       'factory:parked',
     ]);
     if (stopRequested()) return false;
+    await jobs.start(() =>
+      step(ctx, id, () =>
+        listed.small || listed.plan?.approvedBy
+          ? build(ctx, id, true, { retry: true })
+          : replan(ctx, id),
+      ),
+    );
+    return true;
+  }
+  // A job parked for a reason the retry policy covers runs again on its own, up to its
+  // count; after that it waits for a person like any other.
+  // A factory:stop label added after the job parked keeps it parked for a person. When gh
+  // cannot answer, the retry goes ahead and parks again as infra if GitHub is down.
+  if (
+    autoRetryDue(ctx, listed) &&
+    !labeledBy(ctx, issue, 'factory:stop', listed.parked?.at ?? null)
+  ) {
+    await jobs.free();
+    if (!underBudget(ctx)) return true;
+    if (stopRequested()) return false;
+    const reason = listed.parked!.reason;
+    recordEvent(ctx.root, id, 'auto-retry', { reason });
+    gh(ctx.root, ['issue', 'edit', String(issue), '--remove-label', 'factory:parked']);
+    say(`${id}: retrying on its own after ${reason}`);
     await jobs.start(() =>
       step(ctx, id, () =>
         listed.small || listed.plan?.approvedBy

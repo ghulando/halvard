@@ -28,6 +28,7 @@ const commandSpecs: Record<string, { count: number; options?: string[]; required
   'review-recover': { count: 1, options: ['stopped-reviewer'] },
   doctor: { count: 0, options: ['author'] },
   migrate: { count: 0, options: ['apply'] },
+  metrics: { count: 0, options: ['mode', 'since', 'snapshot'] },
   gate: { count: 1 },
   approve: { count: 2 },
   team: {
@@ -40,7 +41,16 @@ const commandSpecs: Record<string, { count: number; options?: string[]; required
   'retro-events': { count: 1 },
 };
 
-const booleans = new Set(['fix', 'small', 'team', 'apply', 'repair', 'stopped-reviewer', 'pane']);
+const booleans = new Set([
+  'fix',
+  'small',
+  'team',
+  'snapshot',
+  'apply',
+  'repair',
+  'stopped-reviewer',
+  'pane',
+]);
 
 export function options(args: string[], allowed: string[] = []) {
   const positional: string[] = [];

@@ -25,6 +25,8 @@ const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
   review <task-file> --author <harness> --reviewer <harness> --round <number> --gate-session <session-key> --pane
                                     Record a team pane's <reviewer>-verdict-round<N>.json
   doctor [--author <harness>]      Diagnose configuration and install drift
+  metrics [--mode solo|team|factory] [--since <days>] [--snapshot]
+                                    Print numbers from the run log and the factory; --snapshot also saves them
   migrate [--apply]                Move data from the earlier folders into ~/.halvard; run it in your own terminal
   review-recover <task-file>       Recover a stopped review without erasing reports
   review-recover <task-file> --stopped-reviewer  Attest a stopped reviewer with missing PID
@@ -130,6 +132,38 @@ try {
       case 'bootstrap-apply': {
         const { applyBootstrap } = await import('../core/setup/bootstrap.ts');
         print(applyBootstrap(positional[0]!, positional[1]!));
+        break;
+      }
+      case 'metrics': {
+        const { saveMetrics, runMetrics } = await import('../core/metrics.ts');
+        const { loadProject } = await import('../core/project.ts');
+        const mode = flags.mode as string | undefined;
+        if (mode !== undefined && !['solo', 'team', 'factory'].includes(mode)) {
+          throw new Error('--mode takes solo, team or factory');
+        }
+        const since = flags.since === undefined ? undefined : Number(flags.since);
+        if (since !== undefined && !(Number.isFinite(since) && since > 0)) {
+          throw new Error('--since takes a positive number of days');
+        }
+        const root = loadProject(process.cwd()).root;
+        const result = runMetrics(root, {
+          ...(mode ? { mode: mode as 'solo' | 'team' | 'factory' } : {}),
+          ...(since !== undefined ? { since } : {}),
+        });
+        // The factory's own numbers, when it has worked this repository; reading them must
+        // not create its folder, and a same-named repository's folder is not this one's.
+        if (mode === undefined || mode === 'factory') {
+          const { factoryHome } = await import('../core/config/paths.ts');
+          const { basename, join } = await import('node:path');
+          const { existsSync } = await import('node:fs');
+          if (existsSync(join(factoryHome(), basename(root), 'jobs'))) {
+            const { metrics } = await import('../core/factory/board.ts');
+            try {
+              result.factory = metrics(root);
+            } catch {}
+          }
+        }
+        print(flags.snapshot ? { ...result, snapshot: saveMetrics(result) } : result);
         break;
       }
       case 'migrate': {

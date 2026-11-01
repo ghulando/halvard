@@ -84,6 +84,8 @@ export interface FactoryConfig {
   budgetUsd: number;
   // Agent runs after the first build that fix a failed gate or a blocked review.
   maxFixPasses: number;
+  // Automatic retries by park reason, which factory serve runs before a person is needed.
+  retryPolicy: Record<string, number>;
   draft: boolean;
   riskPaths: string[];
   // Agent spend per calendar month (UTC); the daemon claims no new work past 90% of it.

@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 //   ~/.halvard/
 //     config/      personal settings and the installed copies; agents never write here
 //     factory/     factory jobs, worktrees and boards; agents never write here
+//     logs/        the run log of solo and team work, kept for good; agents never write here
 //     workspace/   task folders and retro logs; the one folder harness sandboxes may write
 //
 // HALVARD_DATA moves the whole folder; HALVARD_HOME, HALVARD_WORKSPACE and
@@ -103,6 +104,9 @@ export function factoryHome(home = homedir()) {
   if (set) return resolve(set);
   return inLegacy(home, 'factory', legacyPaths(home).factory);
 }
+
+// The run log of solo and team work, kept for good; agents read it but never write it.
+export const logRoot = (home = homedir()) => resolve(dataRoot(home), 'logs');
 
 // Retro logs, one per harness, shared by every repository. An earlier workspace kept them
 // at its top, and still does until migrate.

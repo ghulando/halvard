@@ -24,6 +24,7 @@ import { parseCommand } from './cli.ts';
 import { planIntact, readTask } from './workflow/tasks.ts';
 import { assignment, providers } from './config/reviewers.ts';
 import { workspaceRoot } from './config/paths.ts';
+import { logEvent } from './workflow/log.ts';
 import { packageDigest } from './install/package.ts';
 import { claimsDone, completionStatus } from './workflow/status.ts';
 import { PLAN_CHANGED } from './workflow/complete.ts';
@@ -235,7 +236,38 @@ const factoryRun = () => unattended() || process.env.HALVARD_READONLY === '1';
 const UNATTENDED =
   'This is an unattended factory run: nobody can approve it, and the factory runner commits, pushes and opens the pull request itself. Do not retry; finish the task and report.';
 
+// Decides, then records what the run log keeps: session starts, denials, approval
+// requests and approvals. Logging never changes the decision.
 export async function handle(harness: string | undefined, raw: unknown): Promise<HookResult> {
+  const result = await decide(harness, raw);
+  const payload = raw as HookPayload;
+  const event = payload.hook_event_name;
+  const kind =
+    event === 'SessionStart'
+      ? 'session'
+      : event === 'UserPromptSubmit' && result.context?.startsWith('Approved workflow request')
+        ? 'approval'
+        : event === 'PreToolUse' && (result.decision === 'deny' || result.decision === 'ask')
+          ? result.decision
+          : null;
+  if (kind) {
+    try {
+      const project = loadProject(payload.cwd);
+      const session = sessionKey(project.root, harness!, payload.session_id);
+      logEvent(project, kind, {
+        harness: harness!,
+        session,
+        ...(kind === 'session' ? { repoLevel: true } : {}),
+        ...(kind === 'deny' || kind === 'ask'
+          ? { tool: payload.tool_name ?? null, reason: (result.reason ?? '').split('\n')[0] }
+          : {}),
+      });
+    } catch {}
+  }
+  return result;
+}
+
+async function decide(harness: string | undefined, raw: unknown): Promise<HookResult> {
   if (!harness || !(HARNESSES as readonly string[]).includes(harness)) {
     throw new Error('unknown harness');
   }
@@ -485,7 +517,12 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
                   isShipping(String((payload.tool_input as ToolInput | undefined)?.chars ?? '')))
               ? 'This command commits, merges, pushes or publishes. Review the exact command before approving.'
               : undefined;
-    if (!reason) return {};
+    if (!reason) {
+      if (done && event === 'PreToolUse') {
+        logEvent(project, 'task-done', { harness, session: key });
+      }
+      return {};
+    }
     const requestTree = getTree();
     const request = digest([
       harness,

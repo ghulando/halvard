@@ -47,7 +47,7 @@ export function doctor(cwd: string, author?: string) {
   // part of the new layout: Halvard never reads it and agents cannot write it.
   const data = dataRoot();
   if (rootIsCurrent() && existsSync(data)) {
-    const known = new Set(['.layout', '.migrate.lock', 'config', 'factory', 'workspace']);
+    const known = new Set(['.layout', '.migrate.lock', 'config', 'factory', 'logs', 'workspace']);
     const stray = readdirSync(data).filter((name) => !known.has(name));
     if (stray.length) {
       issues.push(

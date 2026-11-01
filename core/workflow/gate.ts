@@ -1,43 +1,22 @@
 import type { Project } from '../types.ts';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import {
-  closeSync,
-  existsSync,
-  fstatSync,
-  openSync,
-  readSync,
-  readdirSync,
-  statSync,
-  writeSync,
-} from 'node:fs';
+import { closeSync, fstatSync, openSync, readSync, writeSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { currentBranch, gateSteps, loadProject } from '../project.ts';
+import { gateSteps, loadProject } from '../project.ts';
 import { invalidate, privateDirectory, fingerprint, withState } from '../state.ts';
 import { makeDataDir, workspaceRoot } from '../config/paths.ts';
-import { readTask, taskWorkspace } from './tasks.ts';
+import { branchTaskFile, taskWorkspace } from './tasks.ts';
+import { logEvent } from './log.ts';
 
 const GATE_TIMEOUT = 20 * 60 * 1000;
 const GATE_TAIL = 40;
 
 // The log sits with the task's team files; a branch without a task uses the repository folder.
 function gateLogDirectory(project: Project) {
-  const { root, config } = project;
-  const branch = currentBranch(root);
-  const dir = resolve(root, config.workflow.taskDirectory);
-  const tasks = (existsSync(dir) ? readdirSync(dir) : [])
-    .filter((name) => name.endsWith('.md'))
-    .flatMap((name) => {
-      // A hand-written file without workflow metadata names no branch.
-      try {
-        const task = readTask(project, `${config.workflow.taskDirectory}/${name}`);
-        return task.metadata.branch === branch ? [task.file] : [];
-      } catch {
-        return [];
-      }
-    })
-    .sort((a, b) => statSync(resolve(root, b)).mtimeMs - statSync(resolve(root, a)).mtimeMs);
-  if (tasks.length) return taskWorkspace(root, basename(tasks[0]!, '.md'));
+  const { root } = project;
+  const task = branchTaskFile(project);
+  if (task) return taskWorkspace(root, basename(task, '.md'));
   makeDataDir(workspaceRoot());
   return privateDirectory(resolve(workspaceRoot(), basename(root)));
 }
@@ -133,6 +112,13 @@ export async function runGate(cwd: string, key: string) {
     state.pass = { tree: after, command: config.gate!, at: new Date().toISOString() };
     state.gate = null;
     return true;
+  });
+  logEvent(project, 'gate', {
+    session: key,
+    passed: passed === true,
+    reason: passed === true ? null : passed,
+    step: failed?.label ?? null,
+    seconds: Math.round((Date.now() - deadline + GATE_TIMEOUT) / 1000),
   });
   if (passed !== true) throw new Error(`gate failed: ${passed}; fix the cause and rerun`);
   process.stdout.write('workflow: gate passed on the current tree\n');

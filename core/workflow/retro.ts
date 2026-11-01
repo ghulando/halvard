@@ -1,4 +1,7 @@
+import type { Harness } from '../types.ts';
 import type { HistoryHarness } from './clean-history.ts';
+import { HARNESSES } from '../types.ts';
+import { existingLogDirectory, eventFile, readEvents } from '../events.ts';
 import {
   createReadStream,
   existsSync,
@@ -37,9 +40,12 @@ export interface RetroEvents {
   files: { name: string; bytes: number; modified: string }[];
   reviews: { reviewer: string; round: number; verdict: string }[];
   retroLogs: string[];
+  // Where the events came from: Halvard's run log, which covers every harness, or harness
+  // transcripts, which cover Claude, Codex and Pi, for a task older than the log.
+  source: 'log' | 'transcripts';
   // The folder this retro appends its harness's log to; created, with the root's marker.
   retroLogDir: string;
-  events: Record<HistoryHarness, RetroHarnessEvents>;
+  events: Partial<Record<Harness, RetroHarnessEvents>>;
 }
 
 const harnesses: HistoryHarness[] = ['claude', 'codex', 'pi'];
@@ -121,12 +127,67 @@ export async function retroEvents(cwd: string, id: string): Promise<RetroEvents>
           .map((name) => join(logs, name))
       : [],
   );
-  const events = Object.fromEntries(
-    harnesses.map((harness) => [
-      harness,
-      { sessions: [], denials: [], asks: [], approvals: 0, gatePasses: 0, gateFailures: [] },
-    ]),
-  ) as unknown as Record<HistoryHarness, RetroHarnessEvents>;
+  const empty = (): RetroHarnessEvents => ({
+    sessions: [],
+    denials: [],
+    asks: [],
+    approvals: 0,
+    gatePasses: 0,
+    gateFailures: [],
+  });
+  const result = (source: RetroEvents['source'], events: RetroEvents['events']): RetroEvents => ({
+    task: id,
+    repo: root,
+    workspace,
+    window: { from: new Date(from).toISOString(), to: new Date(to).toISOString() },
+    files: entries.map(({ name, stat }) => ({
+      name,
+      bytes: stat.size,
+      modified: new Date(stat.mtimeMs).toISOString(),
+    })),
+    reviews,
+    retroLogs,
+    source,
+    retroLogDir: makeDataDir(retroLogRoot()),
+    events,
+  });
+  const logs = existingLogDirectory(root);
+  const log = logs ? eventFile(logs, id) : null;
+  if (log && existsSync(log)) {
+    const recorded = readEvents(log);
+    const events = Object.fromEntries(HARNESSES.map((h) => [h, empty()])) as Record<
+      Harness,
+      RetroHarnessEvents
+    >;
+    // Gate runs name only their session key; session starts and hook events name its harness.
+    const owner = new Map<string, Harness>();
+    for (const event of [...readEvents(eventFile(logs!, null)), ...recorded]) {
+      if (typeof event.session === 'string' && HARNESSES.includes(event.harness as Harness)) {
+        owner.set(event.session, event.harness as Harness);
+      }
+    }
+    for (const event of recorded) {
+      const harness =
+        (HARNESSES.includes(event.harness as Harness) ? (event.harness as Harness) : null) ??
+        (typeof event.session === 'string' ? owner.get(event.session) : undefined);
+      if (!harness) continue;
+      const summary = events[harness];
+      if (typeof event.session === 'string' && !summary.sessions.includes(event.session)) {
+        summary.sessions.push(event.session);
+      }
+      const reason = String(event.reason ?? '').slice(0, REASON_LIMIT);
+      if (event.kind === 'deny') add(summary.denials, reason);
+      else if (event.kind === 'ask') add(summary.asks, reason);
+      else if (event.kind === 'approval') summary.approvals++;
+      else if (event.kind === 'gate' && event.passed === true) summary.gatePasses++;
+      else if (event.kind === 'gate') add(summary.gateFailures, reason || 'other');
+    }
+    return result('log', events);
+  }
+  const events = Object.fromEntries(harnesses.map((harness) => [harness, empty()])) as Record<
+    HistoryHarness,
+    RetroHarnessEvents
+  >;
   for (const { harness, file, history } of transcriptFiles(harnesses)) {
     if (history) continue;
     const summary = events[harness];
@@ -169,19 +230,5 @@ export async function retroEvents(cwd: string, id: string): Promise<RetroEvents>
       }
     }
   }
-  return {
-    task: id,
-    repo: root,
-    workspace,
-    window: { from: new Date(from).toISOString(), to: new Date(to).toISOString() },
-    files: entries.map(({ name, stat }) => ({
-      name,
-      bytes: stat.size,
-      modified: new Date(stat.mtimeMs).toISOString(),
-    })),
-    reviews,
-    retroLogs,
-    retroLogDir: makeDataDir(retroLogRoot()),
-    events,
-  };
+  return result('transcripts', events);
 }

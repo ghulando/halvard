@@ -319,8 +319,8 @@ test('retro includes records by their own time even when the transcript file is 
     Date.now() - 24 * 60 * 60 * 1000,
   );
   const retro = await retroEvents(root, 'demo');
-  assert.deepEqual(retro.events.pi.sessions, ['pi-restored']);
-  assert.equal(retro.events.pi.approvals, 1);
+  assert.deepEqual(retro.events.pi!.sessions, ['pi-restored']);
+  assert.equal(retro.events.pi!.approvals, 1);
 });
 
 test('retro refuses a missing workspace, a foreign one and an invalid task id', async (t) => {

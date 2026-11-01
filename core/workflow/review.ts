@@ -25,6 +25,7 @@ import { assignment, reviewerChoices, reviewerSettings } from '../config/reviewe
 import { skills } from '../context.ts';
 import { currentBranch, git, loadProject, matches, projectPath } from '../project.ts';
 import { readTask, taskWorkspace } from './tasks.ts';
+import { logEvent } from './log.ts';
 import { digest, fingerprint, stateDirectory, withState } from '../state.ts';
 import { driver } from '../harnesses/index.ts';
 
@@ -526,6 +527,15 @@ export async function runReview(
         state[round === 1 ? 'first' : 'second'] = { ...record, report };
       }
       state.pass = verdict.verdict === 'pass' ? { tree: before, base: task.metadata.base } : null;
+    });
+    logEvent(project, 'review', {
+      harness: author,
+      session: key,
+      task: basename(task.file, '.md'),
+      reviewer,
+      round,
+      verdict: verdict.verdict,
+      findings: verdict.findings.map((f) => ({ severity: f.severity, location: f.location })),
     });
     return { ...record, report };
   } finally {

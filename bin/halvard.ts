@@ -15,7 +15,7 @@ const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
   setup-apply <repo> <proposal>     Apply a reviewed, current proposal
   bootstrap <repo>                 Print stack records and repo state as JSON
   bootstrap-apply <repo> <plan>     Apply a confirmed, current bootstrap plan
-  task-start <id> <title> --author <harness> [--fix] [--small]
+  task-start <id> <title> --author <harness> [--fix] [--small] [--team]
              [--brief <file>] [--base <ref>] [--plan <file> --approved-by <name>]
   task-done <task-file> --gate-session <session-key> [--plan <digest>|none]
                                     Mark done when the session's gate and the review cover this tree
@@ -155,6 +155,7 @@ try {
             author: flags.author as string,
             fix: flags.fix === true,
             small: flags.small === true,
+            team: flags.team === true,
             brief: text('brief'),
             base: flags.base as string | undefined,
             plan: text('plan'),

@@ -246,8 +246,13 @@ Everything Halvard writes for you lives in one hidden folder. Session state, the
 | `~/.halvard/workspace/<repo>/<task>/` | Briefs, reports, review reports and gate logs of one task | write their own `<harness>-` files |
 | `~/.halvard/workspace/retro-logs/` | `<harness>-retro-log.md`, shared by every repository | write their own log |
 | `~/.halvard/factory/<repo>/` | Factory jobs, worktrees and the board; see [factory](factory.md#files) | read only |
+| `~/.halvard/logs/<repo>/` | The run log of solo and team work, kept for good; see [run log](#run-log) | read only |
 
 Only `~/.halvard/workspace` belongs in a harness sandbox grant. The guard denies a file-tool write or Codex patch anywhere else under `~/.halvard`, and a shell redirect there stops for approval. `HALVARD_DATA` moves the whole folder; `HALVARD_HOME`, `HALVARD_WORKSPACE` and `HALVARD_FACTORY_HOME` move one part each. With `HALVARD_DATA` set, an earlier `~/.halvard` workspace is not found; migrate first, then move the folder.
+
+### Run log
+
+The hook and the `gate`, `review` and `task-*` commands append one JSON line per event to `~/.halvard/logs/<repo>/<task>/events.jsonl` while a task's branch is checked out, and to `~/.halvard/logs/<repo>/events.jsonl` otherwise. Events are `session` (a session started), `deny` and `ask` (the guard's decision and reason), `approval`, `gate` (passed or not, with the reason and seconds), `review` (reviewer, round, verdict and finding severities), and `task-start`, `task-handoff` and `task-done`. Each names the time, harness, session key, branch, task and mode: `solo`, or `team` for a task started with `task-start --team`. The session key is a digest; the harness's session id, prompts, commands and file contents are never written. A log that cannot be written never changes a decision. `retro-events` reads it for every harness, Grok and Cursor included. A factory run keeps its own event log in its job folder. Logs are kept until you delete them. While Halvard's data is still in the earlier folders, nothing is logged; run `migrate` first.
 
 Earlier versions used `~/.config/halvard` for settings, `~/.halvard` itself as the workspace and `~/.halvard-factory` for factory jobs. Those folders stay in use until you move them; `doctor` and the session start say so. Close running sessions and factory runs, then run this in your own terminal, never from an agent:
 

@@ -2,7 +2,7 @@ import type { FactoryJob } from './store.ts';
 import type { Context } from './context.ts';
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
-import { personalRoot, workspaceRoot } from '../config/paths.ts';
+import { makeDataDir, personalRoot, workspaceRoot } from '../config/paths.ts';
 import { boxCommand, boxName, removeBox, type Box } from './container.ts';
 import { scrubbedEnv, type Wrapped } from './harness.ts';
 import { gitRunner } from './ship.ts';
@@ -148,7 +148,7 @@ function stateFolder(ctx: Context, job: FactoryJob) {
 // read-only, your personal settings, which feed the configuration and the tree fingerprint.
 export function runnerBox(ctx: Context, job: FactoryJob, checkout: string): Box {
   const workspace = resolve(workspaceRoot(), basename(checkout));
-  mkdirSync(workspace, { recursive: true, mode: 0o700 });
+  makeDataDir(workspace);
   const personal = resolve(personalRoot(), 'personal.json');
   return {
     workdir: checkout,

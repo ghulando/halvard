@@ -53,31 +53,31 @@ Pi needs no marketplace. It loads the package's extension and skills directly.
 grok plugin install ghulando/halvard --trust
 ```
 
-Grok installs Halvard straight from GitHub. It lists the `ghulando` marketplace that Claude Code registers, but does not install Halvard from it. `--trust` grants the plugin's hooks trust, so the install script asks before it installs Halvard in Grok. When Grok refuses the GitHub install, the script installs from a clone in `~/.config/halvard/grok` instead and says why Grok refused. Without a terminal to ask on, it prints the command instead. Grok also loads Claude Code plugins and `~/.cursor/hooks.json`. Every Halvard entry it loads guards as Grok, and one approval covers all of them.
+Grok installs Halvard straight from GitHub. It lists the `ghulando` marketplace that Claude Code registers, but does not install Halvard from it. `--trust` grants the plugin's hooks trust, so the install script asks before it installs Halvard in Grok. When Grok refuses the GitHub install, the script installs from a clone in `~/.halvard/config/grok` instead and says why Grok refused. Without a terminal to ask on, it prints the command instead. Grok also loads Claude Code plugins and `~/.cursor/hooks.json`. Every Halvard entry it loads guards as Grok, and one approval covers all of them.
 
 ### Cursor
 
-The Cursor CLI (`cursor-agent`) has no plugin command. Use the install script. It clones this repository to `~/.config/halvard/cursor`, adds Halvard's entries to `~/.cursor/hooks.json` and links the skills into `~/.cursor/skills`. Entries and skill folders of your own stay. The hooks file is backed up as `hooks.json.halvard.bak` first.
+The Cursor CLI (`cursor-agent`) has no plugin command. Use the install script. It clones this repository to `~/.halvard/config/cursor`, adds Halvard's entries to `~/.cursor/hooks.json` and links the skills into `~/.cursor/skills`. Entries and skill folders of your own stay. The hooks file is backed up as `hooks.json.halvard.bak` first.
 
 ### After installing
 
 1. Restart every open Claude Code, Codex, Pi, Grok and Cursor session. A running session keeps its old hooks.
 2. Approve the hook trust prompt in Claude Code and Codex when it appears.
-3. Make the task workspace writable. Team briefs and reviews go to `~/.halvard`, outside your projects. Add its absolute path to `~/.claude/settings.json`:
+3. Make the task workspace writable. Team briefs and reviews go to `~/.halvard/workspace`, outside your projects. Add its absolute path to `~/.claude/settings.json`:
 
    ```json
-   { "permissions": { "additionalDirectories": ["/Users/you/.halvard"] } }
+   { "permissions": { "additionalDirectories": ["/Users/you/.halvard/workspace"] } }
    ```
 
    and to `~/.codex/config.toml`:
 
    ```toml
    [sandbox_workspace_write]
-   writable_roots = ["/Users/you/.halvard"]
+   writable_roots = ["/Users/you/.halvard/workspace"]
    ```
 
-   Merge these into any settings you already have, and replace `/Users/you` with your home directory.
-4. Optionally create `~/.config/halvard/personal.json` for personal reviewers and read commands, as described in [configuration](configuration.md).
+   Merge these into any settings you already have, and replace `/Users/you` with your home directory. Grant only `workspace`: the rest of `~/.halvard` holds your settings and factory jobs.
+4. Optionally create `~/.halvard/config/personal.json` for personal reviewers and read commands, as described in [configuration](configuration.md).
 
 Start a new session to check the install. A working install shows "Halvard is active" in the startup context.
 
@@ -124,8 +124,8 @@ A project that enabled the plugin in its own `.claude/settings.json` needs `clau
 Halvard does not read the old names. Move your data by hand:
 
 - Rename `.agent-workflow.json` to `.halvard.json` in each repository.
-- Move `~/.config/agent-workflow/personal.json` to `~/.config/halvard/personal.json`.
-- Move the task workspace `~/.agent-workflow` to `~/.halvard`, and update its path in `permissions.additionalDirectories` and `writable_roots`.
+- Move `~/.config/agent-workflow/personal.json` to `~/.halvard/config/personal.json`.
+- Move the task workspace `~/.agent-workflow` to `~/.halvard/workspace`, and update its path in `permissions.additionalDirectories` and `writable_roots`.
 - Rename the `AGENT_WORKFLOW_HOME` and `AGENT_WORKFLOW_WORKSPACE` environment variables to `HALVARD_HOME` and `HALVARD_WORKSPACE`.
 - Call `/halvard` instead of `/workflow`, and `halvard-<step>` instead of `flow-<step>`.
 - Approve operations with `approve halvard <request-id>`.
@@ -142,16 +142,16 @@ The script runs on macOS and Linux. It removes the plugin from Claude Code, Code
 
 ## Install from a local clone
 
-Use this to run your own changes. It copies the package to `~/.config/halvard/package` and installs every harness from there. Do not combine it with the GitHub install: both use the marketplace name `ghulando`, so remove the GitHub install first.
+Use this to run your own changes. It copies the package to `~/.halvard/config/package` and installs every harness from there. Do not combine it with the GitHub install: both use the marketplace name `ghulando`, so remove the GitHub install first.
 
 ```sh
 node bin/halvard.ts install-user
 node bin/halvard.ts install-user --apply
 
-claude plugin marketplace add ~/.config/halvard/package
+claude plugin marketplace add ~/.halvard/config/package
 claude plugin install halvard@ghulando
 
-codex plugin marketplace add ~/.config/halvard
+codex plugin marketplace add ~/.halvard/config
 codex plugin add halvard@ghulando
 ```
 

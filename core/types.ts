@@ -209,6 +209,7 @@ export type Action =
   | { kind: 'shell'; command: string; cwd: string; input: ToolInput }
   | { kind: 'files'; files: FileChange[] }
   | { kind: 'workspace'; paths: string[] }
+  | { kind: 'halvard'; paths: string[] }
   | { kind: 'read' | 'outside' | 'unknown' };
 
 export interface HookResult {
@@ -233,6 +234,8 @@ export interface TaskMetadata {
   branch: string;
   base: string;
   small?: boolean;
+  // How the task runs: one agent, or a Herdr team. Absent means solo.
+  mode?: 'solo' | 'team';
   reviewCycle?: string;
   // An approved plan: the SHA-256 of the task's Approved plan section and who approved it.
   plan?: { digest: string; approvedBy: string; at: string };

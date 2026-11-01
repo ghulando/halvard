@@ -15,7 +15,7 @@ const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
   setup-apply <repo> <proposal>     Apply a reviewed, current proposal
   bootstrap <repo>                 Print stack records and repo state as JSON
   bootstrap-apply <repo> <plan>     Apply a confirmed, current bootstrap plan
-  task-start <id> <title> --author <harness> [--fix] [--small]
+  task-start <id> <title> --author <harness> [--fix] [--small] [--team]
              [--brief <file>] [--base <ref>] [--plan <file> --approved-by <name>]
   task-done <task-file> --gate-session <session-key> [--plan <digest>|none]
                                     Mark done when the session's gate and the review cover this tree
@@ -25,6 +25,7 @@ const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
   review <task-file> --author <harness> --reviewer <harness> --round <number> --gate-session <session-key> --pane
                                     Record a team pane's <reviewer>-verdict-round<N>.json
   doctor [--author <harness>]      Diagnose configuration and install drift
+  migrate [--apply]                Move data from the earlier folders into ~/.halvard; run it in your own terminal
   review-recover <task-file>       Recover a stopped review without erasing reports
   review-recover <task-file> --stopped-reviewer  Attest a stopped reviewer with missing PID
   review-status <task-file>         Show recorded independent reviews
@@ -131,6 +132,11 @@ try {
         print(applyBootstrap(positional[0]!, positional[1]!));
         break;
       }
+      case 'migrate': {
+        const { migrate } = await import('../core/setup/migrate.ts');
+        print(migrate(undefined, Boolean(flags.apply)));
+        break;
+      }
       case 'doctor': {
         const { doctor } = await import('../core/setup/doctor.ts');
         const result = doctor(process.cwd(), flags.author as string);
@@ -149,6 +155,7 @@ try {
             author: flags.author as string,
             fix: flags.fix === true,
             small: flags.small === true,
+            team: flags.team === true,
             brief: text('brief'),
             base: flags.base as string | undefined,
             plan: text('plan'),

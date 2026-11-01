@@ -2,7 +2,7 @@ import type { ReadCommand } from '../types.ts';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
-import { workspaceRoot } from '../config/paths.ts';
+import { projectHoldsData, protectedRoots, workspaceRoot } from '../config/paths.ts';
 import { inside, outsideProject, physicalPath } from '../project.ts';
 
 export type ShellKind = 'read' | 'outside' | 'branch' | 'opaque' | 'mutation';
@@ -573,6 +573,19 @@ function writesOutside(path: string, root: string) {
   );
 }
 
+// A redirection into Halvard's own data outside the workspace. Only absolute and ~/ targets
+// are known; the command stops for approval like any it cannot classify.
+function writesHalvardData(path: string, root?: string, dir?: string | null) {
+  const target = expandHome(path);
+  if (!isAbsolute(target) && !dir) return false;
+  const real = (folder: string) => (existsSync(folder) ? realpathSync(folder) : folder);
+  const physical = physicalPath(resolve(dir ?? '/', target));
+  // A factory worktree lies under the factory folder; its own files are project files.
+  if (root && inside(real(root), physical) && !projectHoldsData(root)) return false;
+  if (inside(real(workspaceRoot()), physical)) return false;
+  return protectedRoots().some((folder) => inside(real(folder), physical));
+}
+
 // git -C naming the project root runs exactly as plain git there.
 export function rootGit(segment: string[], root?: string, cwd?: string) {
   if (!root || segment[0] !== 'git' || segment[1] !== '-C' || !segment[2]) return segment;
@@ -701,6 +714,9 @@ function classify(
         : 'mutation';
   }
   if (!redirects.length) return kind;
+  if (redirects.some((r) => writesHalvardData(r.path, root, dirs[r.segment] ?? cwd))) {
+    return 'opaque';
+  }
   // Writing outside the project is governed by the harness, as for file tools.
   return kind === 'read' && root && redirects.every((r) => writesOutside(r.path, root))
     ? 'outside'

@@ -24,6 +24,7 @@ import { parseCommand } from './cli.ts';
 import { planIntact, readTask } from './workflow/tasks.ts';
 import { assignment, providers } from './config/reviewers.ts';
 import { workspaceRoot } from './config/paths.ts';
+import { logEvent } from './workflow/log.ts';
 import { packageDigest } from './install/package.ts';
 import { claimsDone, completionStatus } from './workflow/status.ts';
 import { PLAN_CHANGED } from './workflow/complete.ts';
@@ -86,12 +87,17 @@ function runnerCall(action: Action, root: string) {
   }
 }
 
-// A runner or installed halvard command followed by factory, in any segment of the command.
-function factoryCall(command: string) {
+// A runner or installed halvard command followed by a command only the user runs, in any
+// segment of the command: factory drives unattended runs and migrate moves Halvard's data.
+const TERMINAL_ONLY = ['factory', 'migrate'];
+function terminalCall(command: string) {
   const parts = commands(command);
-  if (!parts) return /halvard(?:\.ts)?['"]?\s+factory\b/.test(command);
+  if (!parts) return /halvard(?:\.ts)?['"]?\s+(?:factory|migrate)\b/.test(command);
   return parts.some((words) =>
-    words.some((word, i) => /(?:^|\/)halvard(?:\.ts)?$/.test(word) && words[i + 1] === 'factory'),
+    words.some(
+      (word, i) =>
+        /(?:^|\/)halvard(?:\.ts)?$/.test(word) && TERMINAL_ONLY.includes(words[i + 1] ?? ''),
+    ),
   );
 }
 
@@ -230,7 +236,65 @@ const factoryRun = () => unattended() || process.env.HALVARD_READONLY === '1';
 const UNATTENDED =
   'This is an unattended factory run: nobody can approve it, and the factory runner commits, pushes and opens the pull request itself. Do not retry; finish the task and report.';
 
+// Denials from a repository's own extensions; their reasons are the extension's text, so
+// the log names only where they came from.
+const EXTENSION_DENIALS = new WeakSet<HookResult>();
+
+// Decides, then records what the run log keeps: session starts, denials, approval
+// requests and approvals. Logging never changes the decision.
 export async function handle(harness: string | undefined, raw: unknown): Promise<HookResult> {
+  const payload = raw as HookPayload;
+  let result: HookResult;
+  try {
+    result = await decide(harness, raw);
+  } catch (err) {
+    // A hook error blocks the tool like a denial. The message can hold paths or command
+    // text, so the log keeps only that it happened.
+    if (payload?.hook_event_name === 'PreToolUse') {
+      try {
+        const project = loadProject(payload.cwd);
+        logEvent(project, 'deny', {
+          harness: harness ?? null,
+          session: sessionKey(project.root, harness!, payload.session_id),
+          tool: payload.tool_name ?? null,
+          reason: 'hook error',
+        });
+      } catch {}
+    }
+    throw err;
+  }
+  const event = payload.hook_event_name;
+  const kind =
+    event === 'SessionStart'
+      ? 'session'
+      : event === 'UserPromptSubmit' && result.context?.startsWith('Approved workflow request')
+        ? 'approval'
+        : event === 'PreToolUse' && (result.decision === 'deny' || result.decision === 'ask')
+          ? result.decision
+          : null;
+  if (kind) {
+    try {
+      const project = loadProject(payload.cwd);
+      const session = sessionKey(project.root, harness!, payload.session_id);
+      logEvent(project, kind, {
+        harness: harness!,
+        session,
+        ...(kind === 'session' ? { repoLevel: true } : {}),
+        ...(kind === 'deny' || kind === 'ask'
+          ? {
+              tool: payload.tool_name ?? null,
+              reason: EXTENSION_DENIALS.has(result)
+                ? 'workflow extension'
+                : (result.reason ?? '').split('\n')[0],
+            }
+          : {}),
+      });
+    } catch {}
+  }
+  return result;
+}
+
+async function decide(harness: string | undefined, raw: unknown): Promise<HookResult> {
   if (!harness || !(HARNESSES as readonly string[]).includes(harness)) {
     throw new Error('unknown harness');
   }
@@ -277,6 +341,16 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
           decision: 'deny',
           reason:
             'A factory run writes only inside its worktree and task workspace; this target is outside it.',
+        }
+      : {};
+  }
+  // Settings, installed copies and factory jobs feed the guard and the runner; an agent may
+  // read them but only the user and Halvard's own commands write them.
+  if (action.kind === 'halvard') {
+    return event === 'PreToolUse'
+      ? {
+          decision: 'deny',
+          reason: `${action.paths[0]} is Halvard's own data: personal settings, installed copies or factory jobs. Agents may read it but never write it; ask the user to make this change. Agents write only in the task workspace, ${workspaceRoot()}.`,
         }
       : {};
   }
@@ -329,11 +403,13 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
       reason: 'Only the user approves workflow requests. Ask the user to run the approve command.',
     };
   }
-  // The factory runner approves plans, runs reviews and ships; an agent never drives it.
-  if (action.kind === 'shell' && factoryCall(action.command)) {
+  // The factory runner approves plans, runs reviews and ships, and migrate moves Halvard's
+  // data; an agent never drives either.
+  if (action.kind === 'shell' && terminalCall(action.command)) {
     return {
       decision: 'deny',
-      reason: 'Factory commands run only from your own terminal, never from an agent session.',
+      reason:
+        'Factory and migrate commands run only from your own terminal, never from an agent session.',
     };
   }
 
@@ -451,7 +527,11 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
     for (const module of modules) {
       if (!module.pre) continue;
       const reason = await module.pre({ root, config, action });
-      if (reason) return { decision: 'deny', reason: reason as string };
+      if (reason) {
+        const denial: HookResult = { decision: 'deny', reason: reason as string };
+        EXTENSION_DENIALS.add(denial);
+        return denial;
+      }
     }
     const reason =
       action.kind === 'files' &&
@@ -468,7 +548,18 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
                   isShipping(String((payload.tool_input as ToolInput | undefined)?.chars ?? '')))
               ? 'This command commits, merges, pushes or publishes. Review the exact command before approving.'
               : undefined;
-    if (!reason) return {};
+    if (!reason) {
+      if (done && event === 'PreToolUse') {
+        // A branch can hold several tasks; the edit names the one marked done.
+        const file = action.kind === 'files' ? action.files[0]?.path : undefined;
+        logEvent(project, 'task-done', {
+          harness,
+          session: key,
+          ...(file ? { task: basename(file, '.md') } : {}),
+        });
+      }
+      return {};
+    }
     const requestTree = getTree();
     const request = digest([
       harness,

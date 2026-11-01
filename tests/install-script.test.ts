@@ -269,7 +269,7 @@ test(
       { extra: ['grok', 'git'], terminal: 'yes\n', env: { NO_COLOR: '1' } },
     );
     assert.equal(result.status, 0, result.stdout);
-    const root = join(result.home, '.config/halvard/grok');
+    const root = join(result.home, '.halvard/config/grok');
     assert.deepEqual(result.calls.slice(-2), [
       `git clone --quiet --depth 1 https://github.com/ghulando/halvard.git ${root}`,
       `grok plugin install ${root} --trust`,
@@ -278,7 +278,7 @@ test(
       result.stdout,
       /Grok refused github\.com\/ghulando\/halvard: Error: unsupported source/,
     );
-    assert.match(result.stdout, /installed halvard from ~\/\.config\/halvard\/grok, hooks trusted/);
+    assert.match(result.stdout, /installed halvard from ~\/\.halvard\/config\/grok, hooks trusted/);
   },
 );
 

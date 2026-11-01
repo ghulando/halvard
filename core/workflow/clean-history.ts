@@ -12,7 +12,7 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
-import { personalRoot, workspaceRoot } from '../config/paths.ts';
+import { personalRoot, retroLogRoot, workspaceRoot } from '../config/paths.ts';
 import { privateDirectory } from '../state.ts';
 import { driver } from '../harnesses/index.ts';
 
@@ -579,7 +579,10 @@ export function planClean({
     }
   }
   if (stat(root.workflow)?.isSymbolicLink()) throw new Error('Workspace root is a symlink');
+  // Retro logs outlive the task workspaces they came from.
+  const logs = retroLogRoot();
   for (const path of children(root.workflow)) {
+    if (path === logs) continue;
     if (stat(path)?.isDirectory() || stat(path)?.isSymbolicLink()) {
       visit('workflow', path, 'team task workspaces');
     }

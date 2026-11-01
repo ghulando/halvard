@@ -26,7 +26,28 @@ pi_source=git:github.com/$repo
 old_market=agent-workflow-local
 old_ids="agent-workflow@$market agent-workflow@$old_market"
 old_pi=git:github.com/ghulando/agent-workflow
-halvard_home=${HALVARD_HOME:-$HOME/.config/halvard}
+data=${HALVARD_DATA:-$HOME/.halvard}
+# The earlier layout kept settings in ~/.config/halvard and used ~/.halvard itself as the
+# workspace; the new layout marks its root with .layout.
+legacy_root() {
+  [ -d "$data" ] && { [ -e "$data/.workspace.next" ] ||
+    { [ ! -e "$data/.layout" ] && [ -n "$(ls -A "$data" | grep -vxF '.migrate.lock')" ]; }; }
+}
+# Settings stay in the earlier folder until migrate creates config/, so nothing new lands
+# inside an earlier workspace.
+if [ -n "${HALVARD_HOME-}" ]; then
+  halvard_home=$HALVARD_HOME
+elif legacy_root || { [ ! -d "$data/config" ] && [ -d "$HOME/.config/halvard" ]; }; then
+  halvard_home=$HOME/.config/halvard
+else
+  halvard_home=$data/config
+  # Mark a new root, so it is never taken for an earlier workspace.
+  if [ ! -e "$data/.layout" ]; then
+    mkdir -p "$data"
+    chmod 700 "$data"
+    printf '2\n' > "$data/.layout"
+  fi
+fi
 
 node -e '
 const [major, minor] = process.versions.node.split(".").map(Number);
@@ -341,7 +362,13 @@ summary "$c_cursor" "Cursor" "$r_cursor"
 printf '\n%s\n' "Next: restart every open Claude Code, Codex, Pi, Grok and Cursor session, and approve hook trust when asked."
 
 # The workspace note names only the settings that still lack the task workspace.
-workspace=${HALVARD_WORKSPACE:-$HOME/.halvard}
+if [ -n "${HALVARD_WORKSPACE-}" ]; then
+  workspace=$HALVARD_WORKSPACE
+elif legacy_root; then
+  workspace=$data
+else
+  workspace=$data/workspace
+fi
 missing=$(node -e '
 const fs = require("node:fs");
 const [claude, codex, workspace, claudeDir, codexDir] = process.argv.slice(1);
@@ -362,4 +389,19 @@ if [ -n "$missing" ]; then
 fi
 if [ "$r_grok" = waiting ]; then
   printf '%s\n  %s\n' "To install Halvard in Grok, run this script in a terminal and answer yes, or run:" "grok plugin install $repo --trust"
+fi
+# Earlier folders move only when you run migrate; name an installed copy to run it from.
+if { [ -z "${HALVARD_FACTORY_HOME-}" ] && [ -d "$HOME/.halvard-factory" ] && [ ! -d "$data/factory" ]; } ||
+  { [ -z "${HALVARD_HOME-}" ] && [ "$halvard_home" = "$HOME/.config/halvard" ]; } ||
+  { [ -z "${HALVARD_WORKSPACE-}" ] && legacy_root; }; then
+  runner=
+  for candidate in "$halvard_home/cursor/bin/halvard.ts" "$halvard_home/grok/bin/halvard.ts" \
+    "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/git/github.com/$repo/bin/halvard.ts" \
+    $(ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/$market/$plugin"/*/bin/halvard.ts 2> /dev/null | tail -n 1); do
+    if [ -f "$candidate" ]; then
+      runner=$candidate
+      break
+    fi
+  done
+  printf '\n%s\n  %s\n' "Halvard now keeps all its data in $(tilde "$data"). Close running sessions and factory runs, then move the earlier folders with:" "node ${runner:-<plugin-root>/bin/halvard.ts} migrate --apply"
 fi

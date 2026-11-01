@@ -276,10 +276,12 @@ test('retro reports workspace files, review verdicts and earlier retro logs', as
     `${task}/codex-review-round2.md`,
     '# Review round 2 by codex\n\nVerdict: pass. Author: claude.\n',
   );
-  put('.halvard/claude-retro-log.md', 'log');
-  put('.halvard/pi-retro-log.md', 'log');
-  put('.halvard/ollama-retro-log.md', 'log');
-  put('.halvard/notes.md', 'not a retro log');
+  put('.halvard/retro-logs/claude-retro-log.md', 'log');
+  put('.halvard/retro-logs/pi-retro-log.md', 'log');
+  put('.halvard/retro-logs/ollama-retro-log.md', 'log');
+  // A log not yet moved by migrate is still read.
+  put('.halvard/codex-retro-log.md', 'log');
+  put('.halvard/retro-logs/notes.md', 'not a retro log');
   const retro = await retroEvents(root, 'demo');
   assert.deepEqual(
     retro.files.map((file) => file.name),
@@ -291,8 +293,10 @@ test('retro reports workspace files, review verdicts and earlier retro logs', as
   ]);
   assert.deepEqual(
     retro.retroLogs.map((file) => basename(file)),
-    ['claude-retro-log.md', 'ollama-retro-log.md', 'pi-retro-log.md'],
+    ['claude-retro-log.md', 'ollama-retro-log.md', 'pi-retro-log.md', 'codex-retro-log.md'],
   );
+  // The workspace in this fixture is set by HALVARD_WORKSPACE, so logs get their own folder.
+  assert.equal(basename(retro.retroLogDir), 'retro-logs');
   assert.equal(
     new Date(retro.window.from).getTime(),
     new Date(retro.files[0]!.modified).getTime() - 10 * 60 * 1000,
@@ -315,8 +319,8 @@ test('retro includes records by their own time even when the transcript file is 
     Date.now() - 24 * 60 * 60 * 1000,
   );
   const retro = await retroEvents(root, 'demo');
-  assert.deepEqual(retro.events.pi.sessions, ['pi-restored']);
-  assert.equal(retro.events.pi.approvals, 1);
+  assert.deepEqual(retro.events.pi!.sessions, ['pi-restored']);
+  assert.equal(retro.events.pi!.approvals, 1);
 });
 
 test('retro refuses a missing workspace, a foreign one and an invalid task id', async (t) => {

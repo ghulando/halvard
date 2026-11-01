@@ -2,7 +2,7 @@
 
 ## Project and personal settings
 
-Project settings live in `.halvard.json` at the Git repository root. A file in a subdirectory is ignored, and the guard protects it from edits; the root file applies. Personal settings live in `~/.config/halvard/personal.json`, and `HALVARD_HOME` points to another directory. Project settings win over personal ones, except that reviewers merge by provider and read-command lists add up.
+Project settings live in `.halvard.json` at the Git repository root. A file in a subdirectory is ignored, and the guard protects it from edits; the root file applies. Personal settings live in `~/.halvard/config/personal.json`, and `HALVARD_HOME` points to another directory. Project settings win over personal ones, except that reviewers merge by provider and read-command lists add up.
 
 Start from [examples/project.json](../examples/project.json), or run `setup` to get a proposal for your project. The example gate is for a Node project, so replace it for other stacks. Neither install nor setup runs the checks it detects or installs a toolchain.
 
@@ -129,7 +129,7 @@ A gate given as a list of commands runs them in order and stops at the first fai
 {"gate": [["npm", "run", "format:check"], ["npm", "test"]]}
 ```
 
-The full output of each run goes to its own `gate-<session key prefix>-<run>.log` in the task workspace of the current branch's task, or in `~/.halvard/<repo>/` when the branch has no task. The runner prints one pass, fail or skip line per step, the last 40 lines of a failing step and the log path. A single command array works as one step.
+The full output of each run goes to its own `gate-<session key prefix>-<run>.log` in the task workspace of the current branch's task, or in `~/.halvard/workspace/<repo>/` when the branch has no task. The runner prints one pass, fail or skip line per step, the last 40 lines of a failing step and the log path. A single command array works as one step.
 
 ## Read commands
 
@@ -167,7 +167,7 @@ A test run or query can still write files such as caches, and the guard cannot s
 
 Option values must be separate arguments. The guard rejects unknown options, abbreviations, combined short flags and `--name=value`. It also rejects `--` unless the prefix includes it, because programs may forward whatever follows. Trust only executables whose options you understand. Personal entries apply in every repository.
 
-To query an existing graphify graph, add these entries to the personal `readCommands` in `~/.config/halvard/personal.json`:
+To query an existing graphify graph, add these entries to the personal `readCommands` in `~/.halvard/config/personal.json`:
 
 ```json
 {
@@ -230,11 +230,38 @@ Commit, merge, push and publish always come to you. `team show` prints the saved
 
 ## Task workspace
 
-Each task gets a private folder outside the repository for team files: `~/.halvard/<repository folder name>/<task id>/`, or the same path under `HALVARD_WORKSPACE` when it is set. `task-start`, `task-resume` and `task-handoff` create it with mode 0700 and print its path. They refuse an existing folder that is a symlink or that other users can read. A `.repo` file records which repository owns the folder, so a second repository with the same folder name gets an error.
+Each task gets a private folder outside the repository for team files: `~/.halvard/workspace/<repository folder name>/<task id>/`, or the same path under `HALVARD_WORKSPACE` when it is set. `task-start`, `task-resume` and `task-handoff` create it with mode 0700 and print its path. They refuse an existing folder that is a symlink or that other users can read. A `.repo` file records which repository owns the folder, so a second repository with the same folder name gets an error.
 
 Briefs, reports and findings go there, never in a harness's own scratch directory. Name each file `<writer>-<topic>.md`, where the writer is `claude`, `codex`, `pi`, `grok` or `cursor`, for example `claude-brief-codex.md` or `pi-findings-1.md`. The guard denies a file-tool write or Codex patch to a file carrying another writer's prefix, and rejects a patch that touches both the workspace and the repository. Every agent can read every file. Shell writes to the workspace are not checked. Recorded reviews add `<reviewer>-review-round<N>.md`. The task note itself stays in the repository.
 
 Claude Code and Codex may still ask before writing outside the project. `install-user` prints the settings to add: the workspace path in `permissions.additionalDirectories` for Claude, and in `writable_roots` under `[sandbox_workspace_write]` for Codex.
+
+## Where Halvard keeps its data
+
+Everything Halvard writes for you lives in one hidden folder. Session state, the gate and review receipts and pending approvals, stays in the temp directory, because it must not outlive the session.
+
+| Path | Holds | Agents |
+| --- | --- | --- |
+| `~/.halvard/config/` | `personal.json` and the copies the installer clones for Grok, Cursor and `install-user` | read only |
+| `~/.halvard/workspace/<repo>/<task>/` | Briefs, reports, review reports and gate logs of one task | write their own `<harness>-` files |
+| `~/.halvard/workspace/retro-logs/` | `<harness>-retro-log.md`, shared by every repository | write their own log |
+| `~/.halvard/factory/<repo>/` | Factory jobs, worktrees and the board; see [factory](factory.md#files) | read only |
+| `~/.halvard/logs/<repo>/` | The run log of solo and team work, kept for good; see [run log](#run-log) | read only |
+
+Only `~/.halvard/workspace` belongs in a harness sandbox grant. The guard denies a file-tool write or Codex patch anywhere else under `~/.halvard`, and a shell redirect there stops for approval. `HALVARD_DATA` moves the whole folder; `HALVARD_HOME`, `HALVARD_WORKSPACE` and `HALVARD_FACTORY_HOME` move one part each. With `HALVARD_DATA` set, an earlier `~/.halvard` workspace is not found; migrate first, then move the folder.
+
+### Run log
+
+The hook and the `gate`, `review` and `task-*` commands append one JSON line per event to `~/.halvard/logs/<repo>/<task>/events.jsonl` while a task's branch is checked out, and to `~/.halvard/logs/<repo>/events.jsonl` otherwise. Events are `session` (a session started), `deny` and `ask` (the guard's decision and reason), `approval`, `gate` (passed or not, with the reason and seconds), `review` (reviewer, round, verdict and finding severities), and `task-start`, `task-handoff` and `task-done`. Each names the time, harness, session key, branch, task and mode: `solo`, or `team` for a task started with `task-start --team`. The session key is a digest; the harness's session id, prompts, commands and file contents are never written. A hook error is logged as a denial with the reason `hook error`, and a denial from a workflow extension with the reason `workflow extension`, because their own messages can quote paths or commands. A log that cannot be written never changes a decision. `retro-events` reads it for every harness, Grok and Cursor included. A factory run keeps its own event log in its job folder. Logs are kept until you delete them. While Halvard's data is still in the earlier folders, nothing is logged; run `migrate` first.
+
+Earlier versions used `~/.config/halvard` for settings, `~/.halvard` itself as the workspace and `~/.halvard-factory` for factory jobs. Those folders stay in use until you move them; `doctor` and the session start say so. Close running sessions and factory runs, then run this in your own terminal, never from an agent:
+
+```sh
+node <plugin-root>/bin/halvard.ts migrate          # preview
+node <plugin-root>/bin/halvard.ts migrate --apply
+```
+
+It moves the workspace into `workspace/` and the retro logs into `workspace/retro-logs/`, moves the factory folder and repairs its Git worktrees, and copies `personal.json` into `config/`. Rerun the installer afterwards so your harnesses load their copies from `~/.halvard/config`, then delete `~/.config/halvard`, and replace a sandbox grant for `~/.halvard` with one for `~/.halvard/workspace`.
 
 ## Project-local installation
 

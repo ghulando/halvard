@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { authors, eligibleReviewers } from './config/reviewers.ts';
-import { workspaceRoot } from './config/paths.ts';
+import { legacyData, workspaceRoot } from './config/paths.ts';
 import { CONFIG, projectPath } from './project.ts';
 
 export function skills(project: Project) {
@@ -104,6 +104,11 @@ export function startupContext(
     local.length ? 'Project skills:' : 'Project skills: none.',
     ...local.map((skill) => `${skill.name}: ${skill.description} (${skill.file})`),
     `Team files: ${workspaceRoot()}/${basename(project.root)}/<task id>/. Write only ${author}-<topic>.md there.`,
+    ...(legacyData().length
+      ? [
+          'Halvard data is still in its earlier folders. Tell the user once to run halvard migrate in their own terminal; never run it yourself.',
+        ]
+      : []),
   ];
   for (const skill of catalog.filter((s) => project.config.requiredSkills.includes(s.name))) {
     lines.push(`Loaded required skill: ${skill.file}\n${skill.content}`);

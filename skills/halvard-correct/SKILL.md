@@ -9,7 +9,7 @@ Assume every contributor is an agent that sees only the files it opened, copies 
 
 ## Find the mistake classes
 
-Read recent commits, reverts, review findings, agent instruction files, comments that explain workarounds and the retro logs in the task workspace (`<harness>-retro-log.md`). Group the mistakes into classes. A class counts once it has happened twice. Cite the evidence for each class: commit, review round, retro finding id or file and line. Do not copy transcript text, credentials or customer data.
+Read recent commits, reverts, review findings, agent instruction files, comments that explain workarounds and the retro logs in the workspace's `retro-logs` folder (`<harness>-retro-log.md`). Group the mistakes into classes. A class counts once it has happened twice. Cite the evidence for each class: commit, review round, retro finding id or file and line. Do not copy transcript text, credentials or customer data.
 
 Show the classes and the level you propose for each, then stop for the user's choice of which to fix. This is the plan step of the task.
 

@@ -11,9 +11,9 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, join } from 'node:path';
 import { privateDirectory } from '../state.ts';
+import { factoryHome, makeDataDir } from '../config/paths.ts';
 
 export type FactoryStage =
   | 'awaiting-plan'
@@ -64,9 +64,9 @@ export interface FactoryJob {
 }
 
 // Factory jobs, logs and worktrees live outside the repository and outside the team
-// workspace, whose files the guard treats by writer prefix.
-export const factoryHome = () =>
-  resolve(process.env.HALVARD_FACTORY_HOME || resolve(homedir(), '.halvard-factory'));
+// workspace, whose files the guard treats by writer prefix; the guard keeps agents from
+// writing them.
+export { factoryHome };
 
 const JOB_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -78,7 +78,7 @@ export function jobId(value: string) {
 
 // One folder per repository; the marker keeps two repositories with the same name apart.
 export function repoHome(root: string) {
-  mkdirSync(factoryHome(), { recursive: true, mode: 0o700 });
+  makeDataDir(factoryHome());
   const dir = privateDirectory(join(factoryHome(), basename(root)));
   const marker = join(dir, '.repo');
   if (lstatSync(marker, { throwIfNoEntry: false })?.isSymbolicLink()) {

@@ -1,17 +1,26 @@
 import type { Project, Task, TaskMetadata } from '../types.ts';
-import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, dirname, resolve } from 'node:path';
 import { AUTHOR_ERROR, authors, eligibleReviewers } from '../config/reviewers.ts';
-import { workspaceRoot } from '../config/paths.ts';
+import { makeDataDir, workspaceRoot } from '../config/paths.ts';
 import { currentBranch, git, loadProject, projectPath, readText } from '../project.ts';
 import { privateDirectory } from '../state.ts';
+import { writeEvent } from '../events.ts';
 
 // The marker keeps two repositories with the same name from sharing a folder.
 export function taskWorkspace(root: string, id: string) {
   const dir = resolve(workspaceRoot(), basename(root), id);
   const marker = resolve(dir, '.repo');
-  mkdirSync(dirname(dir), { recursive: true, mode: 0o700 });
+  makeDataDir(dirname(dir));
   privateDirectory(dir);
   if (lstatSync(marker, { throwIfNoEntry: false })?.isSymbolicLink()) {
     throw new Error(`task workspace marker ${marker} is a symlink`);
@@ -30,6 +39,25 @@ export function taskWorkspace(root: string, id: string) {
 }
 
 const taskId = (file: string) => basename(file, '.md');
+
+// The task file whose metadata names the current branch, the newest when several do.
+export function branchTaskFile(project: Project, branch = currentBranch(project.root)) {
+  const { root, config } = project;
+  const dir = resolve(root, config.workflow.taskDirectory);
+  const tasks = (existsSync(dir) ? readdirSync(dir) : [])
+    .filter((name) => name.endsWith('.md'))
+    .flatMap((name) => {
+      // A hand-written file without workflow metadata names no branch.
+      try {
+        const task = readTask(project, `${config.workflow.taskDirectory}/${name}`);
+        return task.metadata.branch === branch ? [task.file] : [];
+      } catch {
+        return [];
+      }
+    })
+    .sort((a, b) => statSync(resolve(root, b)).mtimeMs - statSync(resolve(root, a)).mtimeMs);
+  return tasks[0] ?? null;
+}
 
 export function readTask(project: Project, path: string): Task {
   const file = projectPath(project.root, project.root, path);
@@ -99,6 +127,7 @@ export function startTask(
     author,
     fix = false,
     small = false,
+    team = false,
     brief,
     base: baseRef,
     plan,
@@ -109,6 +138,8 @@ export function startTask(
     author: string;
     fix?: boolean;
     small?: boolean;
+    // A Herdr team works the task; recorded so its run log and checks know.
+    team?: boolean;
     // Text of the brief and of an approved plan; a plan needs the name of its approver.
     brief?: string | undefined;
     base?: string | undefined;
@@ -170,6 +201,7 @@ export function startTask(
     branch,
     base,
     small,
+    mode: (team ? 'team' : 'solo') as 'solo' | 'team',
     reviewCycle: randomUUID(),
     ...(planText !== undefined
       ? {
@@ -184,6 +216,14 @@ export function startTask(
   const content = `# ${title}\n\n<!-- halvard ${JSON.stringify(metadata)} -->\n\n**Status:** open.\n\n## Goal\n\n${title.replace(/^#/, '\\#')}\n\n${briefText !== undefined ? `## Brief\n\n${briefText}\n\n` : ''}## Acceptance criteria\n\n${planText !== undefined ? 'The Approved plan section holds the approved criteria.' : '- [ ] Describe the observable result before implementation.'}\n\n## Out of scope\n\nNone recorded.\n\n## Assumptions\n\nNone recorded. A product decision found while working goes to the user.\n\n${planText !== undefined ? `## Approved plan\n\n${planText}\n\n` : ''}## Plan\n\n${planText !== undefined ? `Approved by ${approvedBy!.trim()}; implement the Approved plan without stopping for another approval. Changing that section voids the approval.` : small ? 'Small task; implement directly.' : '- [ ] Record the short implementation plan before coding.'}\n\n## Decisions\n\nNone yet.\n\n## Progress\n\nBranch created; implementation has not started.\n\n## Verification\n\nNot run.\n\n## Review\n\nNot run. Record fixes before re-review; reports are kept outside the source tree.\n\n## Next step\n\nRead project instructions and ${planText !== undefined ? 'implement the approved plan.' : `fill the acceptance criteria${small ? '.' : ' and plan.'}`}\n`;
   mkdirSync(dirname(resolve(root, file)), { recursive: true });
   writeFileSync(resolve(root, file), content, { flag: 'wx' });
+  writeEvent(root, 'task-start', {
+    harness: author,
+    branch,
+    task: id,
+    mode: metadata.mode,
+    small,
+    fix,
+  });
   return { branch, task: file, base, workspace: taskWorkspace(root, id) };
 }
 
@@ -211,6 +251,13 @@ export function handoffTask(cwd: string, path: string, author: string) {
     `<!-- halvard ${JSON.stringify(metadata)} -->`,
   );
   writeFileSync(resolve(project.root, task.file), content);
+  writeEvent(project.root, 'task-handoff', {
+    harness: author,
+    branch: task.metadata.branch,
+    task: taskId(task.file),
+    mode: task.metadata.mode ?? 'solo',
+    from: task.metadata.author,
+  });
   return {
     task: task.file,
     author,

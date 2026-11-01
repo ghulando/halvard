@@ -15,7 +15,7 @@ import {
   readText,
   singleLink,
 } from '../project.ts';
-import { workspaceRoot } from '../config/paths.ts';
+import { projectHoldsData, protectedRoots, workspaceRoot } from '../config/paths.ts';
 import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -109,6 +109,16 @@ function workspacePath(cwd: string, file: unknown) {
   if (!inside(existsSync(base) ? realpathSync(base) : base, physical)) return null;
   singleLink(physical);
   return physical;
+}
+
+// A path in Halvard's own data outside the workspace: settings, installed copies and
+// factory jobs. Agents read it but never write it.
+function halvardDataPath(cwd: string, file: unknown) {
+  if (typeof file !== 'string' || file === '' || file.includes('\0')) return null;
+  const physical = physicalPath(resolve(realpathSync(cwd), file));
+  const real = (path: string) => (existsSync(path) ? realpathSync(path) : path);
+  if (inside(real(workspaceRoot()), physical)) return null;
+  return protectedRoots().some((root) => inside(real(root), physical)) ? physical : null;
 }
 
 // Preview the same patch paths and hunks without changing the tool input.
@@ -250,12 +260,20 @@ export function normalize(project: Project, payload: HookPayload): Action {
             ...patch
               .replace(/\r\n/g, '\n')
               .matchAll(/^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$/gm),
-          ].map((match) => workspacePath(cwd, match[1]))
+          ].map((match) => match[1])
         : [];
-    if (targets.length && targets.every(Boolean)) {
-      return { kind: 'workspace', paths: targets as string[] };
+    // A factory worktree lies under the factory folder; its own files are project files.
+    const data = targets.flatMap((target) =>
+      outsideProject(root, cwd, target) || projectHoldsData(root)
+        ? (halvardDataPath(cwd, target) ?? [])
+        : [],
+    );
+    if (data.length) return { kind: 'halvard', paths: data };
+    const team = targets.map((target) => workspacePath(cwd, target));
+    if (team.length && team.every(Boolean)) {
+      return { kind: 'workspace', paths: team as string[] };
     }
-    if (targets.some(Boolean)) {
+    if (team.some(Boolean)) {
       throw new Error(
         'patch mixes task workspace and other files; send workspace files and repository files as separate patches',
       );
@@ -267,6 +285,9 @@ export function normalize(project: Project, payload: HookPayload): Action {
   }
   if (FILE_TOOLS.has(name)) {
     const target = input.path ?? input.file_path ?? input.notebook_path;
+    const data =
+      (outsideProject(root, cwd, target) || projectHoldsData(root)) && halvardDataPath(cwd, target);
+    if (data) return { kind: 'halvard', paths: [data] };
     const team = outsideProject(root, cwd, target) && workspacePath(cwd, target);
     if (team) return { kind: 'workspace', paths: [team] };
     // Harness plans, memory and scratch files are governed by the harness's own permissions.
@@ -296,6 +317,9 @@ export function normalize(project: Project, payload: HookPayload): Action {
   // so a completion claim cannot slip past the done proof.
   if (name === 'OpaqueEdit') {
     const target = input.file_path;
+    const data =
+      (outsideProject(root, cwd, target) || projectHoldsData(root)) && halvardDataPath(cwd, target);
+    if (data) return { kind: 'halvard', paths: [data] };
     const team = outsideProject(root, cwd, target) && workspacePath(cwd, target);
     if (team) return { kind: 'workspace', paths: [team] };
     if (outsideProject(root, cwd, target)) return { kind: 'outside' };

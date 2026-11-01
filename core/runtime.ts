@@ -86,12 +86,17 @@ function runnerCall(action: Action, root: string) {
   }
 }
 
-// A runner or installed halvard command followed by factory, in any segment of the command.
-function factoryCall(command: string) {
+// A runner or installed halvard command followed by a command only the user runs, in any
+// segment of the command: factory drives unattended runs and migrate moves Halvard's data.
+const TERMINAL_ONLY = ['factory', 'migrate'];
+function terminalCall(command: string) {
   const parts = commands(command);
-  if (!parts) return /halvard(?:\.ts)?['"]?\s+factory\b/.test(command);
+  if (!parts) return /halvard(?:\.ts)?['"]?\s+(?:factory|migrate)\b/.test(command);
   return parts.some((words) =>
-    words.some((word, i) => /(?:^|\/)halvard(?:\.ts)?$/.test(word) && words[i + 1] === 'factory'),
+    words.some(
+      (word, i) =>
+        /(?:^|\/)halvard(?:\.ts)?$/.test(word) && TERMINAL_ONLY.includes(words[i + 1] ?? ''),
+    ),
   );
 }
 
@@ -280,6 +285,16 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
         }
       : {};
   }
+  // Settings, installed copies and factory jobs feed the guard and the runner; an agent may
+  // read them but only the user and Halvard's own commands write them.
+  if (action.kind === 'halvard') {
+    return event === 'PreToolUse'
+      ? {
+          decision: 'deny',
+          reason: `${action.paths[0]} is Halvard's own data: personal settings, installed copies or factory jobs. Agents may read it but never write it; ask the user to make this change. Agents write only in the task workspace, ${workspaceRoot()}.`,
+        }
+      : {};
+  }
   // Each team file has one writer, named by its prefix; everyone may read it.
   if (action.kind === 'workspace') {
     const foreign =
@@ -329,11 +344,13 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
       reason: 'Only the user approves workflow requests. Ask the user to run the approve command.',
     };
   }
-  // The factory runner approves plans, runs reviews and ships; an agent never drives it.
-  if (action.kind === 'shell' && factoryCall(action.command)) {
+  // The factory runner approves plans, runs reviews and ships, and migrate moves Halvard's
+  // data; an agent never drives either.
+  if (action.kind === 'shell' && terminalCall(action.command)) {
     return {
       decision: 'deny',
-      reason: 'Factory commands run only from your own terminal, never from an agent session.',
+      reason:
+        'Factory and migrate commands run only from your own terminal, never from an agent session.',
     };
   }
 

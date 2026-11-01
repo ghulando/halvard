@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { AUTHOR_ERROR, authors, eligibleReviewers } from '../config/reviewers.ts';
-import { personalRoot } from '../config/paths.ts';
+import { dataRoot, legacyData, personalRoot, rootIsCurrent } from '../config/paths.ts';
 import { currentBranch, loadProject } from '../project.ts';
 import { packageStatus } from '../install/package.ts';
 import { pluginRoot } from '../shared/plugin.ts';
@@ -35,6 +35,24 @@ export function doctor(cwd: string, author?: string) {
   if (config.workflow.requireReview) {
     for (const [name, providers] of Object.entries(reviewers)) {
       if (!providers.length) issues.push(`No configured independent reviewer for ${name}.`);
+    }
+  }
+  const legacy = legacyData();
+  if (legacy.length) {
+    issues.push(
+      `Halvard data is still in the earlier folders (${legacy.join(', ')}); run halvard migrate in your own terminal.`,
+    );
+  }
+  // A folder a session created while migrate ran, or one made by hand, is outside every
+  // part of the new layout: Halvard never reads it and agents cannot write it.
+  const data = dataRoot();
+  if (rootIsCurrent() && existsSync(data)) {
+    const known = new Set(['.layout', '.migrate.lock', 'config', 'factory', 'workspace']);
+    const stray = readdirSync(data).filter((name) => !known.has(name));
+    if (stray.length) {
+      issues.push(
+        `${data} holds ${stray.join(', ')}, which the layout does not use; move task folders into ${resolve(data, 'workspace')}.`,
+      );
     }
   }
   const paths = [resolve(personalRoot(), 'package'), resolve(root, 'plugins/halvard')];

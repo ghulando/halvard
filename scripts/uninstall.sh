@@ -37,9 +37,35 @@ claude_dir=${CLAUDE_CONFIG_DIR:-$home/.claude}
 codex_dir=${CODEX_HOME:-$home/.codex}
 pi_dir=${PI_CODING_AGENT_DIR:-$home/.pi/agent}
 cursor_dir=${CURSOR_CONFIG_DIR:-$home/.cursor}
-personal=${HALVARD_HOME:-$home/.config/halvard}
+data=${HALVARD_DATA:-$home/.halvard}
+# The earlier layout kept settings in ~/.config/halvard and used ~/.halvard itself as the
+# workspace; the new layout marks its root with .layout.
+legacy_root() {
+  [ -d "$data" ] && { [ -e "$data/.workspace.next" ] ||
+    { [ ! -e "$data/.layout" ] && [ -n "$(ls -A "$data" | grep -vxF '.migrate.lock')" ]; }; }
+}
+# Installed copies may sit in both settings folders while a migration is unfinished.
+if [ -n "${HALVARD_HOME-}" ]; then
+  personal=$HALVARD_HOME
+  legacy_personal=$HALVARD_HOME
+else
+  personal=$data/config
+  legacy_personal=$home/.config/halvard
+fi
 old_personal=$home/.config/agent-workflow
-workspace=${HALVARD_WORKSPACE:-$home/.halvard}
+# Every workspace a grant may name: the current one and the earlier root.
+if [ -n "${HALVARD_WORKSPACE-}" ]; then
+  workspace=$HALVARD_WORKSPACE
+  grants=$HALVARD_WORKSPACE
+elif legacy_root; then
+  workspace=$data
+  grants="$data/workspace
+$data"
+else
+  workspace=$data/workspace
+  grants="$data/workspace
+$data"
+fi
 
 # Colors only on a terminal; NO_COLOR turns them off.
 color=
@@ -195,7 +221,7 @@ section "$c_pi" "Pi"
 if command -v pi > /dev/null; then
   packages=$(listing pi list)
   # A GitHub install, or the package copied by install-user.
-  for source in $pi_sources "$personal/package" "$old_personal/package"; do
+  for source in $pi_sources "$personal/package" "$legacy_personal/package" "$old_personal/package"; do
     if printf '%s\n' "$packages" | grep -qxF "  $source"; then
       step "removed $(tilde "$source")" pi remove "$source"
     fi
@@ -233,7 +259,8 @@ fi
 section "$c_files" "Harness settings"
 node -e '
 const fs = require("node:fs");
-const [claudeDir, codexDir, workspace, purge] = process.argv.slice(1);
+const [claudeDir, codexDir, grants, purge] = process.argv.slice(1);
+const workspaces = grants.split("\n").filter(Boolean);
 const ids = process.argv[5].split(" ");
 const markets = process.argv[6].split(" ");
 const [color, home] = process.argv.slice(7);
@@ -256,7 +283,7 @@ edit(`${claudeDir}/settings.json`, (text) => {
   for (const market of markets) delete settings.extraKnownMarketplaces?.[market];
   const dirs = settings.permissions?.additionalDirectories;
   if (purge && Array.isArray(dirs)) {
-    settings.permissions.additionalDirectories = dirs.filter((dir) => dir !== workspace);
+    settings.permissions.additionalDirectories = dirs.filter((dir) => !workspaces.includes(dir));
   }
   return JSON.stringify(settings) === original ? text : JSON.stringify(settings, null, 2) + "\n";
 });
@@ -295,7 +322,10 @@ function withoutWorkspace(table) {
     }
     i++;
   }
-  const values = [JSON.stringify(workspace), `\x27${workspace}\x27`].map(escape).join("|");
+  const values = workspaces
+    .flatMap((workspace) => [JSON.stringify(workspace), `\x27${workspace}\x27`])
+    .map(escape)
+    .join("|");
   const array = table.slice(start, i).replace(new RegExp(`(?:${values})[ \\t]*,?[ \\t]*(?:#[^\\n]*)?`, "g"), "");
   return table.slice(0, start) + array + table.slice(i);
 }
@@ -310,13 +340,13 @@ edit(`${codexDir}/config.toml`, (text) => {
     .map((table) => (purge && keyOf(table) === "[sandbox_workspace_write]" ? withoutWorkspace(table) : table))
     .join("");
 });
-' "$claude_dir" "$codex_dir" "$workspace" "$purge" "$ids" "$markets" "$color" "$home"
+' "$claude_dir" "$codex_dir" "$grants" "$purge" "$ids" "$markets" "$color" "$home"
 
 # Cursor: drop Halvard's entries from the user hooks file and its skill links.
 node -e '
 const fs = require("node:fs");
 const path = require("node:path");
-const [dir, root, color, home] = process.argv.slice(1);
+const [dir, root, legacyRoot, color, home] = process.argv.slice(1);
 const paint = (code, text) => (color ? `\x1b[${code}m${text}\x1b[0m` : text);
 const tilde = (p) => (p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p);
 const ours = (entry) =>
@@ -340,13 +370,13 @@ const skills = path.join(dir, "skills");
 let unlinked = 0;
 for (const name of fs.existsSync(skills) ? fs.readdirSync(skills) : []) {
   const link = path.join(skills, name);
-  if (fs.lstatSync(link).isSymbolicLink() && fs.readlinkSync(link).startsWith(`${root}/`)) {
+  if (fs.lstatSync(link).isSymbolicLink() && [root, legacyRoot].some((r) => fs.readlinkSync(link).startsWith(`${r}/`))) {
     fs.rmSync(link);
     unlinked++;
   }
 }
 if (unlinked) console.log(`  ${paint(32, "✓")} removed ${unlinked} Halvard skill links from ${tilde(skills)}`);
-' "$cursor_dir" "$personal/cursor" "$color" "$home"
+' "$cursor_dir" "$personal/cursor" "$legacy_personal/cursor" "$color" "$home"
 
 section "$c_files" "Files"
 tmp=$(node -p 'require("node:os").tmpdir()')
@@ -374,16 +404,19 @@ for market in $markets; do
 done
 remove "$pi_dir/git/github.com/ghulando/halvard"
 remove "$pi_dir/git/github.com/ghulando/agent-workflow"
-remove "$personal/package"
-remove "$personal/cursor"
-remove "$personal/grok"
-remove "$personal/.agents"
+for dir in "$personal" "$legacy_personal"; do
+  remove "$dir/package"
+  remove "$dir/cursor"
+  remove "$dir/grok"
+  remove "$dir/.agents"
+done
 remove "$old_personal/package"
 remove "$old_personal/.agents"
 remove "$tmp/halvard-$(id -u)"
 remove "$tmp/agent-workflow-$(id -u)"
 if [ -n "$purge" ]; then
   remove "$personal"
+  remove "$legacy_personal"
   remove "$workspace"
 fi
 [ -n "$changed" ] || skip "no Halvard files left to remove"
@@ -391,5 +424,6 @@ fi
 printf '\n%s\n' "$(paint 1 'Done.') Restart every open Claude Code, Codex, Pi, Grok and Cursor session."
 printf '%s\n' 'Repositories set up with "halvard.ts install <repo>" keep their own plugins/halvard copy and settings; remove those in each repository.'
 if [ -z "$purge" ]; then
+  [ -e "$personal/personal.json" ] || personal=$legacy_personal
   echo "Kept $(tilde "$personal")/personal.json and $(tilde "$workspace"); run with --purge to remove them too."
 fi

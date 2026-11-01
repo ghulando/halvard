@@ -1,9 +1,16 @@
 import type { HistoryHarness } from './clean-history.ts';
-import { createReadStream, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import {
+  createReadStream,
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+} from 'node:fs';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { transcriptFiles } from './clean-history.ts';
-import { workspaceRoot } from '../config/paths.ts';
+import { makeDataDir, retroLogRoot, workspaceRoot } from '../config/paths.ts';
 import { inside, loadProject } from '../project.ts';
 import { driver } from '../harnesses/index.ts';
 import { object } from '../harnesses/transcript.ts';
@@ -30,6 +37,8 @@ export interface RetroEvents {
   files: { name: string; bytes: number; modified: string }[];
   reviews: { reviewer: string; round: number; verdict: string }[];
   retroLogs: string[];
+  // The folder this retro appends its harness's log to; created, with the root's marker.
+  retroLogDir: string;
   events: Record<HistoryHarness, RetroHarnessEvents>;
 }
 
@@ -102,11 +111,16 @@ export async function retroEvents(cwd: string, id: string): Promise<RetroEvents>
     const verdict = readFileSync(join(workspace, name), 'utf8').match(/^Verdict: (\w+)\./m);
     return [{ reviewer: match[1]!, round: Number(match[2]), verdict: verdict?.[1] ?? 'unknown' }];
   });
-  const retroLogs = readdirSync(base)
-    .filter((name) => name.endsWith('-retro-log.md'))
-    .filter((name) => lstatSync(join(base, name)).isFile())
-    .sort()
-    .map((name) => join(base, name));
+  // Logs not yet moved by migrate still sit at the top of the workspace.
+  const retroLogs = [...new Set([retroLogRoot(), base])].flatMap((logs) =>
+    existsSync(logs)
+      ? readdirSync(logs)
+          .filter((name) => name.endsWith('-retro-log.md'))
+          .filter((name) => lstatSync(join(logs, name)).isFile())
+          .sort()
+          .map((name) => join(logs, name))
+      : [],
+  );
   const events = Object.fromEntries(
     harnesses.map((harness) => [
       harness,
@@ -167,6 +181,7 @@ export async function retroEvents(cwd: string, id: string): Promise<RetroEvents>
     })),
     reviews,
     retroLogs,
+    retroLogDir: makeDataDir(retroLogRoot()),
     events,
   };
 }

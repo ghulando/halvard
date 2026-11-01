@@ -27,6 +27,7 @@ const commandSpecs: Record<string, { count: number; options?: string[]; required
   'review-status': { count: 1 },
   'review-recover': { count: 1, options: ['stopped-reviewer'] },
   doctor: { count: 0, options: ['author'] },
+  migrate: { count: 0, options: ['apply'] },
   gate: { count: 1 },
   approve: { count: 2 },
   team: {

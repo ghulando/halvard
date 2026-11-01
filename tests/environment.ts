@@ -32,3 +32,18 @@ after(() => {
   }
   rmSync(workspace, { recursive: true, force: true });
 });
+
+// The data root holds config, workspace and factory folders; keep it out of the real home.
+const previousData = process.env.HALVARD_DATA;
+const data = mkdtempSync(join(tmpdir(), 'workflow-suite-data-'));
+
+process.env.HALVARD_DATA = data;
+
+after(() => {
+  if (previousData === undefined) {
+    delete process.env.HALVARD_DATA;
+  } else {
+    process.env.HALVARD_DATA = previousData;
+  }
+  rmSync(data, { recursive: true, force: true });
+});

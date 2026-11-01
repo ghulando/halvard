@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { flowConfig, personalSettings } from '../config/workflow.ts';
-import { personalRoot, workspaceRoot } from '../config/paths.ts';
+import { makeDataDir, personalRoot, workspaceRoot } from '../config/paths.ts';
 import { projectPath } from '../project.ts';
 import { applyInstallation } from './transaction.ts';
 import { packageStatus } from './package.ts';
@@ -97,6 +97,8 @@ export function installPersonal(
       'installed package content differs; preview install-user --repair, then apply with --repair --apply',
     );
   }
+  // A new root gets its layout marker before the first file lands in it.
+  makeDataDir(destination, home);
   applyInstallation({
     source: pluginRoot,
     copy: plan.copy,

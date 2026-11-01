@@ -198,7 +198,7 @@ Allow the model API hosts of your harnesses and your package registry. Pass `HTT
 
 ## Board and metrics
 
-`factory board` writes `~/.halvard-factory/<repo>/board.html`: one static page, no script, that your browser reloads every 30 seconds. It shows every job by stage, its reviewer and round, cost, pull request and why it parked, under a row of numbers. `plan`, `approve`, `build`, `run`, `rework`, `replan`, `stop`, `retro` and `ship` write it when they finish, and `serve` after every step. A job's id on its card links to the job's own page, `jobs/<job>/job.html`, with its state, the timeline of agent runs, gates and review findings, the brief, the plan, the evidence and the last lines of each log. All job text shows as escaped text. `factory metrics` prints the same numbers as JSON:
+`factory board` writes `~/.halvard/factory/<repo>/board.html`: one static page, no script, that your browser reloads every 30 seconds. It shows every job by stage, its reviewer and round, cost, pull request and why it parked, under a row of numbers. `plan`, `approve`, `build`, `run`, `rework`, `replan`, `stop`, `retro` and `ship` write it when they finish, and `serve` after every step. A job's id on its card links to the job's own page, `jobs/<job>/job.html`, with its state, the timeline of agent runs, gates and review findings, the brief, the plan, the evidence and the last lines of each log. All job text shows as escaped text. `factory metrics` prints the same numbers as JSON:
 
 | Number | Meaning |
 | --- | --- |
@@ -301,7 +301,7 @@ Before you use Grok as the author, run the headless probes from the factory rese
 
 | Path | Holds |
 | --- | --- |
-| `~/.halvard-factory/<repo>/jobs/<job>/job.json` | The job's state, written only by the runner |
+| `~/.halvard/factory/<repo>/jobs/<job>/job.json` | The job's state, written only by the runner |
 | `…/events.jsonl` | One line per step: agent runs with cost and time, gate, review, commit, PR |
 | `…/brief.md`, `…/plan.md` | The brief and the plan as proposed and approved |
 | `…/agent.log`, `…/runner.log`, `…/setup.log` | Agent output, gate and review output, setup output |
@@ -311,10 +311,10 @@ Before you use Grok as the author, run the headless probes from the factory rese
 | `…/stop`, `…/rework-<time>.md` | A stop request from `factory stop`, and your rework notes |
 | `…/state` | Container mode: the gate and review receipts, which only runner steps mount |
 | `…/job.html` | The job's page, written with the board |
-| `~/.halvard-factory/<repo>/worktrees/<repo>-<job>` | The job's worktree, or its clone in container mode, on its task branch |
-| `~/.halvard-factory/<repo>/board.html` | The board |
+| `~/.halvard/factory/<repo>/worktrees/<repo>-<job>` | The job's worktree, or its clone in container mode, on its task branch |
+| `~/.halvard/factory/<repo>/board.html` | The board |
 
-`HALVARD_FACTORY_HOME` moves the whole folder. Team files and review summaries stay in the task workspace, `~/.halvard/<repo>-<job>/<job>/`.
+`HALVARD_FACTORY_HOME` moves the whole folder. Agents may read it but never write it. Team files and review summaries stay in the task workspace, `~/.halvard/workspace/<repo>-<job>/<job>/`.
 
 ## Parked jobs
 

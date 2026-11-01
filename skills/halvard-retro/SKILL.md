@@ -7,7 +7,7 @@ Run the retro in the session that finished the task; in a team run, the lead run
 
 ## Evidence first
 
-Run `node <plugin-root>/bin/halvard.ts retro-events <task-id>` from the repository root. It prints the task workspace files, recorded review verdicts, the paths of earlier retro logs and, per harness, the sessions found, guard denials and asks grouped by reason, `approve halvard` prompts, and gate passes and failures. It reads Claude, Codex and Pi transcripts whose cwd is the repository, between ten minutes before the earliest workspace file and an hour after the latest. Claude asks answered in the native dialog leave no record and are not counted. Say so instead of claiming none happened.
+Run `node <plugin-root>/bin/halvard.ts retro-events <task-id>` from the repository root. It prints the task workspace files, recorded review verdicts, the paths of earlier retro logs, the folder this retro's log goes in and, per harness, the sessions found, guard denials and asks grouped by reason, `approve halvard` prompts, and gate passes and failures. It reads Claude, Codex and Pi transcripts whose cwd is the repository, between ten minutes before the earliest workspace file and an hour after the latest. Claude asks answered in the native dialog leave no record and are not counted. Say so instead of claiming none happened.
 
 Read every file in `retroLogs`, then the task file and the workspace briefs, reports, findings and verdicts. A solo run also uses its own session: corrections the user made and steps that were repeated.
 
@@ -21,7 +21,7 @@ When the findings run out, ask one open question: what slowed or annoyed the use
 
 ## Log
 
-Append one entry to `<harness>-retro-log.md` in the workspace root, the directory that holds the retro logs and repository folders. Write only this harness's file. The entry has a heading with the date, repository name and task id, a line of event counts per harness, a line of review verdicts, and one line per finding: id, classification, target, one-sentence cause, times seen including this retro, and `actionable` when seen in two or more retros, otherwise `note`. Record the user's closing answer the same way.
+Append one entry to `<harness>-retro-log.md` in the `retroLogDir` folder that `retro-events` prints, never anywhere else. Write only this harness's file. The entry has a heading with the date, repository name and task id, a line of event counts per harness, a line of review verdicts, and one line per finding: id, classification, target, one-sentence cause, times seen including this retro, and `actionable` when seen in two or more retros, otherwise `note`. Record the user's closing answer the same way.
 
 Never copy transcript text, commands, file contents, credentials or customer data into the log. Guard reasons from `retro-events` and short summaries of the user's answers are the only quoted material.
 

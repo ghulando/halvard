@@ -5,7 +5,6 @@ import {
   closeSync,
   existsSync,
   fstatSync,
-  mkdirSync,
   openSync,
   readSync,
   readdirSync,
@@ -15,7 +14,7 @@ import {
 import { basename, join, resolve } from 'node:path';
 import { currentBranch, gateSteps, loadProject } from '../project.ts';
 import { invalidate, privateDirectory, fingerprint, withState } from '../state.ts';
-import { workspaceRoot } from '../config/paths.ts';
+import { makeDataDir, workspaceRoot } from '../config/paths.ts';
 import { readTask, taskWorkspace } from './tasks.ts';
 
 const GATE_TIMEOUT = 20 * 60 * 1000;
@@ -39,7 +38,7 @@ function gateLogDirectory(project: Project) {
     })
     .sort((a, b) => statSync(resolve(root, b)).mtimeMs - statSync(resolve(root, a)).mtimeMs);
   if (tasks.length) return taskWorkspace(root, basename(tasks[0]!, '.md'));
-  mkdirSync(workspaceRoot(), { recursive: true, mode: 0o700 });
+  makeDataDir(workspaceRoot());
   return privateDirectory(resolve(workspaceRoot(), basename(root)));
 }
 

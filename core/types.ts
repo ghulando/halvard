@@ -209,6 +209,7 @@ export type Action =
   | { kind: 'shell'; command: string; cwd: string; input: ToolInput }
   | { kind: 'files'; files: FileChange[] }
   | { kind: 'workspace'; paths: string[] }
+  | { kind: 'halvard'; paths: string[] }
   | { kind: 'read' | 'outside' | 'unknown' };
 
 export interface HookResult {

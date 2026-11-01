@@ -3,7 +3,7 @@ import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, dirname, resolve } from 'node:path';
 import { AUTHOR_ERROR, authors, eligibleReviewers } from '../config/reviewers.ts';
-import { workspaceRoot } from '../config/paths.ts';
+import { makeDataDir, workspaceRoot } from '../config/paths.ts';
 import { currentBranch, git, loadProject, projectPath, readText } from '../project.ts';
 import { privateDirectory } from '../state.ts';
 
@@ -11,7 +11,7 @@ import { privateDirectory } from '../state.ts';
 export function taskWorkspace(root: string, id: string) {
   const dir = resolve(workspaceRoot(), basename(root), id);
   const marker = resolve(dir, '.repo');
-  mkdirSync(dirname(dir), { recursive: true, mode: 0o700 });
+  makeDataDir(dirname(dir));
   privateDirectory(dir);
   if (lstatSync(marker, { throwIfNoEntry: false })?.isSymbolicLink()) {
     throw new Error(`task workspace marker ${marker} is a symlink`);

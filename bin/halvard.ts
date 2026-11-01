@@ -25,6 +25,7 @@ const help = `halvard commands (<harness> is pi, claude, codex, grok or cursor):
   review <task-file> --author <harness> --reviewer <harness> --round <number> --gate-session <session-key> --pane
                                     Record a team pane's <reviewer>-verdict-round<N>.json
   doctor [--author <harness>]      Diagnose configuration and install drift
+  migrate [--apply]                Move data from the earlier folders into ~/.halvard; run it in your own terminal
   review-recover <task-file>       Recover a stopped review without erasing reports
   review-recover <task-file> --stopped-reviewer  Attest a stopped reviewer with missing PID
   review-status <task-file>         Show recorded independent reviews
@@ -129,6 +130,11 @@ try {
       case 'bootstrap-apply': {
         const { applyBootstrap } = await import('../core/setup/bootstrap.ts');
         print(applyBootstrap(positional[0]!, positional[1]!));
+        break;
+      }
+      case 'migrate': {
+        const { migrate } = await import('../core/setup/migrate.ts');
+        print(migrate(undefined, Boolean(flags.apply)));
         break;
       }
       case 'doctor': {

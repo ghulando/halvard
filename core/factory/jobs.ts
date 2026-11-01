@@ -23,6 +23,28 @@ export const parkError = (ctx: Context, job: FactoryJob, err: unknown) =>
     ? park(ctx, job, err.reason, err.message)
     : park(ctx, job, 'infra', (err as Error).message);
 
+// What a person does next, by park reason; shown in the issue comment.
+export const NEXT_STEP: Record<string, string> = {
+  infra:
+    'Read `runner.log` and `setup.log` in the job folder, fix the cause, then add `factory:retry`.',
+  'budget-time': 'Raise `timeouts` in the factory configuration, or narrow the issue, then retry.',
+  'budget-usd': 'Raise `budgetUsd`, or narrow the issue, then retry.',
+  'agent-blocked': 'Answer what the agent asked with `factory rework <job> --note <file>`.',
+  'gate-failed':
+    'Read the gate output in `runner.log`; rework with a note, or fix the gate, then retry.',
+  'review-blocked':
+    'Read the review summary in the task workspace, then `factory rework` with a note.',
+  'reviewer-unavailable': 'Check the reviewer harness is installed and signed in, then retry.',
+  conflict: 'Update the base branch or resolve the conflict, then retry.',
+  'holdout-failed': 'Read `holdout.log`; rework with a note that names the failing check.',
+  tampered:
+    'Inspect the worktree and your Git settings, then `factory build <job> --retry --checked`.',
+  'out-of-scope': 'Widen the job scope or rework with a note; the change touched files it may not.',
+  'plan-changed': 'Plan the job again with `factory replan <job>`.',
+  'stopped-by-human':
+    'Remove `factory:stop` and add `factory:retry` when the job should run again.',
+};
+
 export function park(ctx: Context, job: FactoryJob, reason: string, detail: string) {
   job.stage = 'parked';
   job.parked = { reason, detail: detail.slice(0, 4000), at: new Date().toISOString() };
@@ -30,8 +52,12 @@ export function park(ctx: Context, job: FactoryJob, reason: string, detail: stri
   recordEvent(ctx.root, job.id, 'parked', { reason, detail: job.parked.detail });
   say(`${job.id} parked (${reason}): ${detail.split('\n')[0]}`);
   if (job.issue) {
+    const next = NEXT_STEP[reason];
+    const auto = ctx.factory.retryPolicy[reason] ?? 0;
     const body = `The Halvard factory parked job \`${job.id}\`: **${reason}**.\n\n${detail}\n\n${
       job.worktree ? `The worktree is kept at \`${job.worktree}\` for inspection.\n\n` : ''
+    }${next ? `Next step: ${next}\n\n` : ''}${
+      auto ? `\`factory serve\` retries this reason on its own up to ${auto} time(s).\n\n` : ''
     }A human decides what happens next.`;
     commentOnIssue(ctx, job, body);
     gh(ctx.root, ['issue', 'edit', String(job.issue.number), '--add-label', 'factory:parked']);

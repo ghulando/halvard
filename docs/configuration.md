@@ -226,6 +226,8 @@ Older files may still contain `protectedPaths` or `workflow.shellApproval`. The 
 | `nudge` | The lead may send one short prompt to an idle worker that stopped without a report. |
 | `approve` | `reads-edits-gate`: the lead answers a worker's prompt for a read, an edit inside the repository or task workspace, or the gate. Everything else comes to you. `none`: every prompt comes to you. |
 
+Start a team task with `task-start --team`. It copies the saved team, with the task's branch and base, into `~/.halvard/logs/<repo>/<task>/team.json`, where agents cannot edit it, and the guard then enforces the roles while that branch is checked out. Task files do not decide it: a follow-up task file on the branch, or an edited `branch` or `mode` in one, leaves the rule in place. A marker that does not read stops every edit until you fix or remove it. Starting a task id whose branch still exists is refused, and a solo task with the id of an earlier team task removes its marker. A file-tool edit or Codex patch by the lead, reviewer or investigator harness is denied, unless that harness is also the dev; the lead may still edit task files. Workspace files keep their one-writer rule. Shell commands cannot be mapped to the files they change, so they are not checked. A task started without `--team` is solo, whatever its task file says. Team tasks need Halvard's data in `~/.halvard`; run `migrate` first.
+
 Commit, merge, push and publish always come to you. `team show` prints the saved team. `team set --dev cursor` changes only the roles you name; it asks before it writes, like any edit to `.halvard.json`.
 
 ## Task workspace
@@ -253,6 +255,18 @@ Only `~/.halvard/workspace` belongs in a harness sandbox grant. The guard denies
 ### Run log
 
 The hook and the `gate`, `review` and `task-*` commands append one JSON line per event to `~/.halvard/logs/<repo>/<task>/events.jsonl` while a task's branch is checked out, and to `~/.halvard/logs/<repo>/events.jsonl` otherwise. Events are `session` (a session started), `deny` and `ask` (the guard's decision and reason), `approval`, `gate` (passed or not, with the reason and seconds), `review` (reviewer, round, verdict and finding severities), and `task-start`, `task-handoff` and `task-done`. Each names the time, harness, session key, branch, task and mode: `solo`, or `team` for a task started with `task-start --team`. The session key is a digest; the harness's session id, prompts, commands and file contents are never written. A hook error is logged as a denial with the reason `hook error`, and a denial from a workflow extension with the reason `workflow extension`, because their own messages can quote paths or commands. A log that cannot be written never changes a decision. `retro-events` reads it for every harness, Grok and Cursor included. A factory run keeps its own event log in its job folder. Logs are kept until you delete them. While Halvard's data is still in the earlier folders, nothing is logged; run `migrate` first.
+
+### Metrics
+
+`halvard metrics` works out numbers from the run log and the factory store each time it runs; nothing but the logs is kept. Run it from a repository; agents may run it too, because it only reads.
+
+```sh
+node <plugin-root>/bin/halvard.ts metrics                  # solo, team and factory
+node <plugin-root>/bin/halvard.ts metrics --mode team --since 30
+node <plugin-root>/bin/halvard.ts metrics --snapshot       # also saves ~/.halvard/metrics/<repo>-<hash>-<mode>-<time>.json
+```
+
+It prints tasks started and done by mode (with `--since`, the tasks that started in the window, with their real first gate and review), the first gate pass rate, the first-round review block rate and re-review rate, and the guard's denials and asks by reason. For each ask reason, `approvedRate` is the share the same session's next approval answered. A rule whose asks you nearly always approve is friction; a rule that never appears may no longer be needed. `hookErrors` counts tool calls the hook blocked with an error. The `factory` block is `factory metrics`; `--since` does not filter it. Denials on a branch without a task count for every mode.
 
 Earlier versions used `~/.config/halvard` for settings, `~/.halvard` itself as the workspace and `~/.halvard-factory` for factory jobs. Those folders stay in use until you move them; `doctor` and the session start say so. Close running sessions and factory runs, then run this in your own terminal, never from an agent:
 

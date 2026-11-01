@@ -7,6 +7,8 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  renameSync,
+  rmSync,
   writeFileSync,
   writeSync,
 } from 'node:fs';
@@ -153,6 +155,100 @@ export function writeEvent(
       closeSync(fd);
     }
   } catch {}
+}
+
+// The team a task was started with, kept beside its log where agents cannot edit it. The
+// task file's own mode field is agent-editable, so the guard trusts only this marker.
+export interface TeamMarker {
+  lead: string;
+  dev: string;
+  reviewer: string;
+  investigator: string | null;
+  // The branch and base the task started on. The guard matches the marker to the checked-out
+  // branch, never to a task file, because the lead may edit task files.
+  branch: string;
+  base: string;
+}
+
+export const teamMarkerFile = (dir: string, task: string) => join(dir, task, 'team.json');
+
+function needsCurrentRoot() {
+  if (!rootIsCurrent()) {
+    throw new Error(
+      "team tasks need Halvard's data in ~/.halvard; run halvard migrate in your own terminal first",
+    );
+  }
+}
+
+// Writes the marker or throws: a team task the guard cannot recognise must not start. A
+// marker left by an earlier task with this id is replaced.
+export function writeTeamMarker(root: string, task: string, team: TeamMarker) {
+  needsCurrentRoot();
+  if (!TASK_ID.test(task)) throw new Error('task id must be a short lowercase slug');
+  const dir = privateDirectory(join(repoLogDirectory(root), task));
+  const next = join(dir, `.team.${process.pid}.json`);
+  const fd = openSync(
+    next,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    writeSync(fd, JSON.stringify(team) + '\n');
+  } finally {
+    closeSync(fd);
+  }
+  // A rename replaces a planted link at the destination instead of writing through it.
+  renameSync(next, join(dir, 'team.json'));
+}
+
+// Removes the marker an earlier task with this id left, so a new solo task is solo.
+export function clearTeamMarker(root: string, task: string) {
+  if (!TASK_ID.test(task)) return;
+  const dir = existingLogDirectory(root);
+  if (dir) rmSync(teamMarkerFile(dir, task), { force: true });
+}
+
+// Whether any task of the repository was started with --team; a cheap check before the
+// marker lookup on every edit.
+export function hasTeamTasks(root: string) {
+  const dir = existingLogDirectory(root);
+  if (!dir) return false;
+  return readdirSync(dir).some((task) => existsSync(teamMarkerFile(dir, task)));
+}
+
+// The team working on a branch, or null when no team task started on it. A marker that
+// does not read stops the hook, so it fails closed until the user fixes or removes it.
+export function teamOnBranch(root: string, branch: string | null): TeamMarker | null {
+  const dir = existingLogDirectory(root);
+  if (!dir || !branch) return null;
+  for (const task of readdirSync(dir)) {
+    const file = teamMarkerFile(dir, task);
+    if (!existsSync(file)) continue;
+    if (!lstatSync(file).isFile()) throw new Error(`team marker ${file} is not a file`);
+    let value: Partial<TeamMarker>;
+    try {
+      value = JSON.parse(readFileSync(file, 'utf8')) as Partial<TeamMarker>;
+    } catch {
+      throw new Error(`team marker ${file} does not read; fix or remove it`);
+    }
+    if (
+      typeof value.lead !== 'string' ||
+      typeof value.dev !== 'string' ||
+      typeof value.branch !== 'string'
+    ) {
+      throw new Error(`team marker ${file} does not read; fix or remove it`);
+    }
+    if (value.branch !== branch) continue;
+    return {
+      lead: value.lead,
+      dev: value.dev,
+      reviewer: typeof value.reviewer === 'string' ? value.reviewer : '',
+      investigator: typeof value.investigator === 'string' ? value.investigator : null,
+      branch: value.branch,
+      base: typeof value.base === 'string' ? value.base : '',
+    };
+  }
+  return null;
 }
 
 // Every event in a log file, skipping lines that do not parse.

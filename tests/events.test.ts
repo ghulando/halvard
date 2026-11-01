@@ -23,7 +23,7 @@ import { runGate } from '../core/workflow/gate.ts';
 import { retroEvents } from '../core/workflow/retro.ts';
 import { sessionKey } from '../core/state.ts';
 
-function fixture(t: TestContext, gate = 'process.exit(0)', workflow = {}) {
+function fixture(t: TestContext, gate = 'process.exit(0)', workflow = {}, extra = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'workflow-events-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   execFileSync('git', ['init', '-q', '--initial-branch=main'], { cwd: root });
@@ -32,6 +32,7 @@ function fixture(t: TestContext, gate = 'process.exit(0)', workflow = {}) {
     JSON.stringify({
       gate: [process.execPath, '-e', gate],
       workflow: { reviewers: { claude: {}, codex: {}, grok: {}, cursor: {} }, ...workflow },
+      ...extra,
     }),
   );
   execFileSync('git', ['add', '.'], { cwd: root });
@@ -78,7 +79,12 @@ test('session starts are logged for the repository', async (t) => {
 });
 
 test('a task run logs its start, mode, gate and denials in the task log', async (t) => {
-  const root = fixture(t);
+  const root = fixture(
+    t,
+    'process.exit(0)',
+    {},
+    { team: { lead: 'claude', dev: 'cursor', reviewer: 'codex' } },
+  );
   startTask(root, { id: 'team-run', title: 'Team run', author: 'cursor', team: true });
   const task = readFileSync(join(root, 'docs/tasks/team-run.md'), 'utf8');
   assert.match(task, /"mode":"team"/);

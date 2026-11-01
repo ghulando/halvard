@@ -22,6 +22,7 @@ import { hasReview } from './workflow/review.ts';
 import { evaluatePolicy } from './guard/policy.ts';
 import { parseCommand } from './cli.ts';
 import { planIntact, readTask } from './workflow/tasks.ts';
+import { hasTeamTasks, teamOnBranch } from './events.ts';
 import { assignment, providers } from './config/reviewers.ts';
 import { workspaceRoot } from './config/paths.ts';
 import { logEvent } from './workflow/log.ts';
@@ -162,6 +163,8 @@ function runnerKind(call: ParsedCommand | null) {
   if (call?.verb === 'team' && call.positional[0] === 'show' && !Object.keys(call.flags).length) {
     return 'read';
   }
+  // A snapshot writes a file; the numbers alone only read the logs.
+  if (call?.verb === 'metrics' && !call.flags.snapshot) return 'read';
   if (call?.verb === 'task-start') return 'branch';
   return null;
 }
@@ -481,6 +484,8 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
       protectedBranches: config.protectedBranches,
     });
     if (decision) return decision;
+    const role = event === 'PreToolUse' ? teamRole(project, harness, action, branch) : null;
+    if (role) return { decision: 'deny', reason: role };
     const done = claimsDone(action, config);
     let tree: string | undefined;
     const getTree = () => (tree ??= fingerprint(root, undefined, deadline));
@@ -588,6 +593,27 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
     state.consumed = toolCall ? { id: request, call: toolCall } : null;
     return {};
   });
+}
+
+// On a branch a team task started on, only the dev changes repository files; the lead may
+// also edit task notes. The team comes from the marker beside the task's log, matched to the
+// checked-out branch: agents cannot edit the marker, and task files cannot switch it off.
+// Shell commands cannot be mapped to paths and are not checked here.
+function teamRole(project: Project, harness: string, action: Action, branch: string | null) {
+  if (action.kind !== 'files' || !hasTeamTasks(project.root)) return null;
+  const team = teamOnBranch(project.root, branch ?? currentBranch(project.root));
+  if (!team || harness === team.dev) return null;
+  const roles = (['lead', 'reviewer', 'investigator'] as const).filter(
+    (role) => team[role] === harness,
+  );
+  if (!roles.length) return null;
+  const notes = roles.includes('lead');
+  const blocked = action.files.find(
+    (change) => !(notes && matches(change.path, project.config.taskFiles)),
+  );
+  if (!blocked) return null;
+  // The first line is fixed, so the run log groups these denials under one reason.
+  return `Team role: only the dev changes repository files.\nIn this team task ${harness} is the ${roles.join(' and ')}; only the dev (${team.dev}) changes repository files${notes ? ', and the lead edits only task notes' : ''}. Send ${blocked.path} to the dev in a brief.`;
 }
 
 // A hand-written task without workflow metadata has no recorded approval to protect.

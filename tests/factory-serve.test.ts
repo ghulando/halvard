@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import test from 'node:test';
 import { factoryCommand } from '../core/factory/command.ts';
-import { loadJob, listJobs } from '../core/factory/store.ts';
+import { jobEvents, loadJob, listJobs } from '../core/factory/store.ts';
 import { boardHtml, metrics } from '../core/factory/board.ts';
 import { env, repo, stubs } from './factory-stubs.ts';
 
@@ -376,4 +376,36 @@ test('a pipe or a link in the frozen tests parks the job as tampered without han
       /parked after tampering/,
     );
   }
+});
+
+test('serve retries a covered park reason on its own, once, and not after factory:stop', async (t) => {
+  const { root, github } = setup(t, { retryPolicy: { 'agent-blocked': 1 } });
+  const autoRetries = (id: string) =>
+    jobEvents(root, id).filter((event) => event.event === 'auto-retry').length;
+  github.issue(7, 'Blocked twice');
+  github.label(7, 'factory', 'maintainer');
+  github.label(7, 'factory:small', 'maintainer');
+  env(t, { STUB_AGENT: 'blocked' });
+  await serveOnce(root);
+  assert.equal(loadJob(root, 'issue-7').parked!.reason, 'agent-blocked');
+  // The next pass retries on its own; the agent blocks again.
+  await serveOnce(root);
+  assert.equal(autoRetries('issue-7'), 1);
+  assert.equal(loadJob(root, 'issue-7').parked!.reason, 'agent-blocked');
+  // The count is spent: a pass with a working agent leaves the job for a person.
+  env(t, { STUB_AGENT: undefined });
+  await serveOnce(root);
+  assert.equal(autoRetries('issue-7'), 1);
+  assert.equal(loadJob(root, 'issue-7').stage, 'parked');
+
+  github.issue(8, 'Stopped after parking');
+  github.label(8, 'factory', 'maintainer');
+  github.label(8, 'factory:small', 'maintainer');
+  env(t, { STUB_AGENT: 'blocked' });
+  await serveOnce(root);
+  assert.equal(loadJob(root, 'issue-8').parked!.reason, 'agent-blocked');
+  github.label(8, 'factory:stop', 'maintainer');
+  await serveOnce(root);
+  assert.equal(autoRetries('issue-8'), 0);
+  assert.equal(loadJob(root, 'issue-8').stage, 'parked');
 });

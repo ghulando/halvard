@@ -1,14 +1,18 @@
 import { createHash } from 'node:crypto';
 import {
-  appendFileSync,
+  closeSync,
+  constants,
   existsSync,
   lstatSync,
+  openSync,
   readFileSync,
   readdirSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { logRoot, makeDataDir, rootIsCurrent } from './config/paths.ts';
+import { privateDirectory } from './state.ts';
 
 // The run log: one JSON line per workflow event, kept for good under ~/.halvard/logs, where
 // agents can read but not write. Solo and team runs write it from the hook and the CLI;
@@ -31,7 +35,10 @@ export interface WorkflowEvent {
   [field: string]: unknown;
 }
 
+// Bytes per line: one O_APPEND write of this size lands whole between concurrent writers.
 const LINE_LIMIT = 8 * 1024;
+// A task id as task-start accepts it; anything else is not used as a folder name.
+const TASK_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const TEXT_LIMIT = 500;
 
 // A factory run has nobody watching this log and its own job log instead.
@@ -47,8 +54,13 @@ export function repoLogDirectory(root: string) {
     const marker = join(dir, '.repo');
     if (!existsSync(dir)) {
       makeDataDir(dir);
-      writeFileSync(marker, root + '\n', { flag: 'wx', mode: 0o600 });
-      return dir;
+      try {
+        writeFileSync(marker, root + '\n', { flag: 'wx', mode: 0o600 });
+        return dir;
+      } catch (err) {
+        // Another writer created it first; the check below reads its marker.
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      }
     }
     if (
       lstatSync(dir).isDirectory() &&
@@ -104,36 +116,42 @@ export function writeEvent(
 ) {
   try {
     if (factoryRun() || !rootIsCurrent()) return;
-    const {
-      harness = null,
-      session = null,
-      branch = null,
-      task = null,
-      mode = null,
-      repoLevel = false,
-      ...rest
-    } = fields;
+    const { harness, session, branch, task, mode, repoLevel = false, ...rest } = fields;
+    const text = (value: unknown) => (typeof value === 'string' ? (clip(value) as string) : null);
+    // Task metadata is agent-editable; a task id that is not a slug never becomes a path.
+    const id = typeof task === 'string' && TASK_ID.test(task) && task.length <= 64 ? task : null;
     const event: WorkflowEvent = {
       at: new Date().toISOString(),
       kind,
-      mode,
-      harness,
-      session,
-      branch,
-      task,
+      mode: mode === 'solo' || mode === 'team' ? mode : null,
+      harness: text(harness),
+      session: text(session),
+      branch: text(branch),
+      task: id,
       ...(clip(rest) as Record<string, unknown>),
     };
     let line = JSON.stringify(event);
-    if (line.length > LINE_LIMIT) {
+    if (Buffer.byteLength(line) >= LINE_LIMIT) {
       line = JSON.stringify({
         ...event,
         ...Object.fromEntries(Object.keys(rest).map((k) => [k, '[clipped]'])),
       });
     }
+    if (Buffer.byteLength(line) >= LINE_LIMIT) return;
     const dir = repoLogDirectory(root);
-    const file = eventFile(dir, repoLevel ? null : task);
-    makeDataDir(resolve(file, '..'));
-    appendFileSync(file, line + '\n', { mode: 0o600 });
+    const file = eventFile(dir, repoLevel ? null : id);
+    // A folder or file planted as a symlink is refused rather than written through.
+    privateDirectory(resolve(file, '..'));
+    const fd = openSync(
+      file,
+      constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW,
+      0o600,
+    );
+    try {
+      writeSync(fd, line + '\n');
+    } finally {
+      closeSync(fd);
+    }
   } catch {}
 }
 

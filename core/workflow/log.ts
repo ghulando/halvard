@@ -24,7 +24,7 @@ export function logEvent(
   let mode: Mode | null = null;
   try {
     branch = currentBranch(project.root);
-    const file = given === undefined ? branchTaskFile(project) : null;
+    const file = given === undefined ? branchTaskFile(project, branch) : null;
     task = given ?? (file ? basename(file, '.md') : null);
     if (task) {
       const path = file ?? `${project.config.workflow.taskDirectory}/${task}.md`;

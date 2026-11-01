@@ -236,11 +236,33 @@ const factoryRun = () => unattended() || process.env.HALVARD_READONLY === '1';
 const UNATTENDED =
   'This is an unattended factory run: nobody can approve it, and the factory runner commits, pushes and opens the pull request itself. Do not retry; finish the task and report.';
 
+// Denials from a repository's own extensions; their reasons are the extension's text, so
+// the log names only where they came from.
+const EXTENSION_DENIALS = new WeakSet<HookResult>();
+
 // Decides, then records what the run log keeps: session starts, denials, approval
 // requests and approvals. Logging never changes the decision.
 export async function handle(harness: string | undefined, raw: unknown): Promise<HookResult> {
-  const result = await decide(harness, raw);
   const payload = raw as HookPayload;
+  let result: HookResult;
+  try {
+    result = await decide(harness, raw);
+  } catch (err) {
+    // A hook error blocks the tool like a denial. The message can hold paths or command
+    // text, so the log keeps only that it happened.
+    if (payload?.hook_event_name === 'PreToolUse') {
+      try {
+        const project = loadProject(payload.cwd);
+        logEvent(project, 'deny', {
+          harness: harness ?? null,
+          session: sessionKey(project.root, harness!, payload.session_id),
+          tool: payload.tool_name ?? null,
+          reason: 'hook error',
+        });
+      } catch {}
+    }
+    throw err;
+  }
   const event = payload.hook_event_name;
   const kind =
     event === 'SessionStart'
@@ -259,7 +281,12 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
         session,
         ...(kind === 'session' ? { repoLevel: true } : {}),
         ...(kind === 'deny' || kind === 'ask'
-          ? { tool: payload.tool_name ?? null, reason: (result.reason ?? '').split('\n')[0] }
+          ? {
+              tool: payload.tool_name ?? null,
+              reason: EXTENSION_DENIALS.has(result)
+                ? 'workflow extension'
+                : (result.reason ?? '').split('\n')[0],
+            }
           : {}),
       });
     } catch {}
@@ -500,7 +527,11 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
     for (const module of modules) {
       if (!module.pre) continue;
       const reason = await module.pre({ root, config, action });
-      if (reason) return { decision: 'deny', reason: reason as string };
+      if (reason) {
+        const denial: HookResult = { decision: 'deny', reason: reason as string };
+        EXTENSION_DENIALS.add(denial);
+        return denial;
+      }
     }
     const reason =
       action.kind === 'files' &&
@@ -519,7 +550,13 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
               : undefined;
     if (!reason) {
       if (done && event === 'PreToolUse') {
-        logEvent(project, 'task-done', { harness, session: key });
+        // A branch can hold several tasks; the edit names the one marked done.
+        const file = action.kind === 'files' ? action.files[0]?.path : undefined;
+        logEvent(project, 'task-done', {
+          harness,
+          session: key,
+          ...(file ? { task: basename(file, '.md') } : {}),
+        });
       }
       return {};
     }

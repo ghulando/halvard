@@ -41,9 +41,8 @@ export function taskWorkspace(root: string, id: string) {
 const taskId = (file: string) => basename(file, '.md');
 
 // The task file whose metadata names the current branch, the newest when several do.
-export function branchTaskFile(project: Project) {
+export function branchTaskFile(project: Project, branch = currentBranch(project.root)) {
   const { root, config } = project;
-  const branch = currentBranch(root);
   const dir = resolve(root, config.workflow.taskDirectory);
   const tasks = (existsSync(dir) ? readdirSync(dir) : [])
     .filter((name) => name.endsWith('.md'))

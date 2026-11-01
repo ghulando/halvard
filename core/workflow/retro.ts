@@ -43,6 +43,8 @@ export interface RetroEvents {
   // Where the events came from: Halvard's run log, which covers every harness, or harness
   // transcripts, which cover Claude, Codex and Pi, for a task older than the log.
   source: 'log' | 'transcripts';
+  // Gate runs in the log whose session no logged event ties to a harness.
+  unattributed: { gatePasses: number; gateFailures: RetroCount[] };
   // The folder this retro appends its harness's log to; created, with the root's marker.
   retroLogDir: string;
   events: Partial<Record<Harness, RetroHarnessEvents>>;
@@ -135,6 +137,7 @@ export async function retroEvents(cwd: string, id: string): Promise<RetroEvents>
     gatePasses: 0,
     gateFailures: [],
   });
+  const unattributed: RetroEvents['unattributed'] = { gatePasses: 0, gateFailures: [] };
   const result = (source: RetroEvents['source'], events: RetroEvents['events']): RetroEvents => ({
     task: id,
     repo: root,
@@ -148,6 +151,7 @@ export async function retroEvents(cwd: string, id: string): Promise<RetroEvents>
     reviews,
     retroLogs,
     source,
+    unattributed,
     retroLogDir: makeDataDir(retroLogRoot()),
     events,
   });
@@ -170,7 +174,13 @@ export async function retroEvents(cwd: string, id: string): Promise<RetroEvents>
       const harness =
         (HARNESSES.includes(event.harness as Harness) ? (event.harness as Harness) : null) ??
         (typeof event.session === 'string' ? owner.get(event.session) : undefined);
-      if (!harness) continue;
+      if (!harness) {
+        if (event.kind === 'gate' && event.passed === true) unattributed.gatePasses++;
+        else if (event.kind === 'gate') {
+          add(unattributed.gateFailures, String(event.reason ?? 'other').slice(0, REASON_LIMIT));
+        }
+        continue;
+      }
       const summary = events[harness];
       if (typeof event.session === 'string' && !summary.sessions.includes(event.session)) {
         summary.sessions.push(event.session);

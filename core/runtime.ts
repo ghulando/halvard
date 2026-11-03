@@ -7,15 +7,28 @@ import type {
   ParsedCommand,
   Extension,
   ToolInput,
+  PendingRequest,
 } from './types.ts';
 import { HARNESSES } from './types.ts';
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { currentBranch, findRoot, inside, loadProject, matches, projectPath } from './project.ts';
 import { startupContext } from './context.ts';
-import { commands, isShipping, rootGit, shellKind } from './guard/shell.ts';
+import { commands, rootGit, shellKind, shippingKind } from './guard/shell.ts';
+import {
+  GRANT_TTL,
+  REQUEST_TTL,
+  approve,
+  clock,
+  grantOf,
+  isPending,
+  logId,
+  recordOutcome,
+  short,
+} from './approval.ts';
 import { normalize } from './guard/tools.ts';
 import { HOOK_BUDGET, digest, fingerprint, sessionKey, withState } from './state.ts';
 import { hasReview } from './workflow/review.ts';
@@ -186,26 +199,9 @@ async function extensions(project: Project) {
   return loaded;
 }
 
-const APPROVAL_STALE =
-  'Workflow approval is missing, stale or expired. Retry the original operation to request a fresh approval.';
-
-// Marks one pending request approved. The prompt hook calls it for the approval phrase;
-// `halvard approve` calls it from the user's own terminal on hosts without a prompt hook.
-function approve(root: string, key: string, id: string, deadline?: number) {
-  return withState(root, key, (state) => {
-    const pending = state.pending;
-    if (
-      !pending ||
-      pending.id !== id ||
-      pending.tree !== fingerprint(root, undefined, deadline) ||
-      Date.now() - pending.at > 600000
-    ) {
-      return APPROVAL_STALE;
-    }
-    state.approved = pending.id;
-    return `Approved workflow request ${pending.id}, once. Retry the exact original operation.`;
-  });
-}
+// The first line of a shipping request Halvard could not classify; the run log groups by it.
+const UNCERTAIN_SHIPPING =
+  'Halvard cannot tell whether this command commits, merges, pushes or publishes.';
 
 export async function approveFromTerminal(cwd: string, key: string, id: string) {
   // The guard denies an agent's approve command; a headless reviewer never approves.
@@ -215,8 +211,8 @@ export async function approveFromTerminal(cwd: string, key: string, id: string) 
   if (!/^[a-f0-9]{64}$/.test(key) || !/^[a-f0-9]{64}$/.test(id)) {
     throw new Error('approve needs a session key and a request id');
   }
-  const message = await approve(loadProject(cwd).root, key, id);
-  if (message === APPROVAL_STALE) throw new Error(message);
+  const { outcome, message } = await approve(loadProject(cwd), null, key, id, 'terminal');
+  if (outcome !== 'approved') throw new Error(message);
   return message;
 }
 
@@ -242,6 +238,8 @@ const UNATTENDED =
 // Denials from a repository's own extensions; their reasons are the extension's text, so
 // the log names only where they came from.
 const EXTENSION_DENIALS = new WeakSet<HookResult>();
+// Log fields for an approval request: digests only.
+const ASKS = new WeakMap<HookResult, Record<string, unknown>>();
 
 // Decides, then records what the run log keeps: session starts, denials, approval
 // requests and approvals. Logging never changes the decision.
@@ -267,14 +265,13 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
     throw err;
   }
   const event = payload.hook_event_name;
+  // Approval outcomes are logged where they are decided, with their request.
   const kind =
     event === 'SessionStart'
       ? 'session'
-      : event === 'UserPromptSubmit' && result.context?.startsWith('Approved workflow request')
-        ? 'approval'
-        : event === 'PreToolUse' && (result.decision === 'deny' || result.decision === 'ask')
-          ? result.decision
-          : null;
+      : event === 'PreToolUse' && (result.decision === 'deny' || result.decision === 'ask')
+        ? result.decision
+        : null;
   if (kind) {
     try {
       const project = loadProject(payload.cwd);
@@ -289,6 +286,7 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
               reason: EXTENSION_DENIALS.has(result)
                 ? 'workflow extension'
                 : (result.reason ?? '').split('\n')[0],
+              ...(ASKS.get(result) ?? {}),
             }
           : {}),
       });
@@ -331,7 +329,14 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
   }
   if (event === 'UserPromptSubmit') {
     if (unattended()) return { context: `Approval refused. ${UNATTENDED}` };
-    const message = await approve(root, key, (approval as RegExpMatchArray)[1]!, deadline);
+    const { message } = await approve(
+      project,
+      harness,
+      key,
+      (approval as RegExpMatchArray)[1]!,
+      'prompt',
+      deadline,
+    );
     return { context: message };
   }
   if (!['PreToolUse', 'PostToolUse'].includes(event as string)) {
@@ -383,6 +388,7 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
 
   // The gate receipt names a tree fingerprint, so completion needs no per-command invalidation.
   if (event === 'PostToolUse') {
+    await hostAllowed(project, harness, key, payload);
     const notes = [];
     if (!payload.is_error) {
       for (const module of modules) {
@@ -404,6 +410,22 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
     return {
       decision: 'deny',
       reason: 'Only the user approves workflow requests. Ask the user to run the approve command.',
+    };
+  }
+  // The approval dialog server and the approval module answer requests; Codex starts the
+  // server for the user, and an agent that ran either could answer its own request.
+  // Reading their source stays allowed; running or importing it does not.
+  const approvalCode =
+    /(?:\b(?:node|tsx|ts-node|deno|bun|npx|sh|bash|zsh|exec)\b[^\n;|&]*|\b(?:import|require)\b[^\n;]*|(?:^|[;&|(]\s*)[\w./-]*?)(?:approval-mcp|core\/approval)(?:\.ts)?\b(?![\w-]|\.test)/;
+  if (
+    (action.kind === 'shell' && approvalCode.test(action.command)) ||
+    (payload.tool_name === 'write_stdin' &&
+      approvalCode.test(String((payload.tool_input as ToolInput | undefined)?.chars ?? '')))
+  ) {
+    return {
+      decision: 'deny',
+      reason:
+        "Only Codex starts Halvard's approval dialog server, for the user. Call the halvard_request_approval tool instead.",
     };
   }
   // The factory runner approves plans, runs reviews and ships, and migrate moves Halvard's
@@ -468,6 +490,17 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
           shellParts[0]![1] === 'branch' &&
           shellParts[0]![2] === '-d' &&
           shellParts[0]!.slice(3).every((name) => /^[A-Za-z0-9][\w./-]*$/.test(name))));
+    // Codex can type a command into a shell it already started.
+    const typed =
+      payload.tool_name === 'write_stdin'
+        ? String((payload.tool_input as ToolInput | undefined)?.chars ?? '')
+        : null;
+    const shipping =
+      action.kind === 'shell'
+        ? shippingKind(action.command, config.readCommands, root)
+        : typed !== null
+          ? shippingKind(typed, config.readCommands, root)
+          : null;
     const decision = evaluatePolicy({
       readonly: readonlyMode(payload),
       read,
@@ -480,7 +513,8 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
       shipping: approvedShipping,
       shippingAttempt:
         action.kind === 'shell' &&
-        (isShipping(action.command) || /\bgit\s+branch\s+(?:-d|--delete)\b/.test(action.command)),
+        (shipping?.kind === 'shipping' ||
+          /\bgit\s+branch\s+(?:-d|--delete)\b/.test(action.command)),
       protectedBranches: config.protectedBranches,
     });
     if (decision) return decision;
@@ -547,12 +581,11 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
           : (call?.verb === 'team' && call.positional[0] !== 'show') ||
               (action.kind === 'shell' && /halvard(?:\.ts)?\S*\s+team\s+set\b/.test(action.command))
             ? 'This changes the team in the workflow configuration.'
-            : (action.kind === 'shell' && (approvedShipping || isShipping(action.command))) ||
-                // Codex can type a command into a shell it already started.
-                (payload.tool_name === 'write_stdin' &&
-                  isShipping(String((payload.tool_input as ToolInput | undefined)?.chars ?? '')))
+            : approvedShipping || shipping?.kind === 'shipping'
               ? 'This command commits, merges, pushes or publishes. Review the exact command before approving.'
-              : undefined;
+              : shipping
+                ? `${UNCERTAIN_SHIPPING}\n${shipping.why} Review the exact command before approving.`
+                : undefined;
     if (!reason) {
       if (done && event === 'PreToolUse') {
         // A branch can hold several tasks; the edit names the one marked done.
@@ -573,7 +606,7 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
       return {};
     }
     const requestTree = getTree();
-    const request = digest([
+    const op = digest([
       harness,
       key,
       payload.tool_name,
@@ -584,22 +617,99 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
     ]);
     const toolCall =
       typeof payload.tool_use_id === 'string' && payload.tool_use_id ? payload.tool_use_id : null;
-    if (toolCall && state.consumed?.id === request && state.consumed.call === toolCall) return {};
+    // Grok can run several Halvard entries for one call; the others see the spent grant.
+    if (toolCall && state.consumed?.id === op && state.consumed.call === toolCall) return {};
+    const now = Date.now();
+    const pending = isPending(state.pending) ? state.pending : null;
+    const grant = grantOf(state);
     if (
-      state.approved !== request ||
-      state.pending?.id !== request ||
-      Date.now() - state.pending.at > 600000
+      pending?.op === op &&
+      grant?.id === pending.id &&
+      grant.at >= pending.at &&
+      now - grant.at <= GRANT_TTL
     ) {
-      if (unattended()) return { decision: 'deny', reason: `${reason} ${UNATTENDED}` };
-      state.pending = { id: request, tree: requestTree, at: Date.now() };
-      return { decision: 'ask', reason, request, session: key };
+      // The approval is one-use. The gate receipt stays bound to its tree fingerprint.
+      state.pending = null;
+      state.approved = null;
+      state.consumed = toolCall ? { id: op, call: toolCall } : null;
+      return {};
     }
-    // The approval is one-use. The gate receipt stays bound to its tree fingerprint.
-    state.pending = null;
-    state.approved = null;
-    state.consumed = toolCall ? { id: request, call: toolCall } : null;
-    return {};
+    if (unattended()) return { decision: 'deny', reason: `${reason} ${UNATTENDED}` };
+    // A grant that was not used in time, or that belongs to another request, lapses.
+    if (grant) state.approved = null;
+    let current: PendingRequest;
+    let refreshed = false;
+    if (pending?.op === op && now - pending.at <= REQUEST_TTL) {
+      // The same operation asked again within its lifetime keeps its id and expiry.
+      current = { ...pending, call: toolCall ?? pending.call ?? null };
+    } else {
+      const again = pending?.op === op;
+      refreshed = again;
+      current = {
+        id: digest([op, now, randomUUID()]),
+        op,
+        tree: requestTree,
+        at: now,
+        issue: again ? pending.issue + 1 : 1,
+        root,
+        summary: operationSummary(payload, action),
+        call: toolCall,
+        previous: again ? { id: pending.id, at: pending.at } : null,
+      };
+    }
+    state.pending = current;
+    // Every showing of a reissued request says so, so the user can tell it is the current one.
+    const status =
+      (current.previous
+        ? `The earlier request for this operation (${short(current.previous.id)}) expired at ${clock(current.previous.at + REQUEST_TTL)}; this is a new request. `
+        : '') +
+      `Request ${short(current.id)} was issued at ${clock(current.at)} and expires at ${clock(current.at + REQUEST_TTL)}.`;
+    const asked: HookResult = {
+      decision: 'ask',
+      reason: `${reason}\n${status}`,
+      request: current.id,
+      session: key,
+    };
+    ASKS.set(asked, {
+      request: logId(current.id),
+      op: logId(op),
+      ...(current.id === pending?.id ? { repeat: true } : {}),
+      ...(refreshed ? { refreshed: true } : {}),
+    });
+    return asked;
   });
+}
+
+// Claude and Grok answer an ask in their own dialog, and no hook reports a rejection. When
+// the exact call that was asked, by the host's call id, reaches PostToolUse, the host let
+// it run: logged as host-allowed, which is not a user approval Halvard verified. Asks with
+// no such evidence stay unknown.
+const NATIVE_ASK = new Set(['claude', 'grok']);
+async function hostAllowed(project: Project, harness: string, key: string, payload: HookPayload) {
+  const call = payload.tool_use_id;
+  if (!NATIVE_ASK.has(harness) || typeof call !== 'string' || !call) return;
+  try {
+    const request = await withState(project.root, key, (state) => {
+      const pending = isPending(state.pending) ? state.pending : null;
+      if (!pending || pending.call !== call) return null;
+      // The asked operation ran; its request is finished and cannot be approved later.
+      state.pending = null;
+      return pending.id;
+    });
+    if (request) recordOutcome(project, harness, key, request, 'host-allowed', `${harness}-native`);
+  } catch {}
+}
+
+// The operation an approval dialog shows: the exact command or the files and tool. It
+// stays in the private state file and never reaches the run log.
+function operationSummary(payload: HookPayload, action: Action) {
+  const text =
+    action.kind === 'shell'
+      ? action.command
+      : action.kind === 'files'
+        ? `${payload.tool_name ?? 'edit'}: ${action.files.map((file) => file.path).join(', ')}`
+        : `${payload.tool_name ?? 'tool'} ${JSON.stringify(payload.tool_input ?? {})}`;
+  return text.length > 4000 ? `${text.slice(0, 4000)}\n[truncated]` : text;
 }
 
 // On a branch a team task started on, only the dev changes repository files; the lead may

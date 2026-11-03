@@ -1,5 +1,7 @@
 import type { ExtensionAPI, ExtensionContext, ToolEvent } from '@earendil-works/pi-coding-agent';
 import { handle } from '../core/runtime.ts';
+import { answerDialog } from '../core/approval.ts';
+import { loadProject } from '../core/project.ts';
 import planMode from './plan-ui.ts';
 
 // The factory needs no Pi runtime import: Pi supplies this API to the package.
@@ -79,12 +81,17 @@ export default function workflow(pi: ExtensionAPI) {
           `Approve Halvard operation?\n${result.reason}\n\n${event.toolName}\n${JSON.stringify(event.input, null, 2)}`,
           [once, 'No'],
         );
-        if (choice === once) {
-          await handle('pi', {
-            ...payload(ctx, {}, 'UserPromptSubmit'),
-            prompt: `approve halvard ${result.request}`,
-          });
-          result = await handle('pi', input);
+        if (result.request && result.session) {
+          // Pi's select returns undefined when the dialog is dismissed without a choice.
+          const { outcome } = await answerDialog(
+            loadProject(ctx.cwd),
+            'pi',
+            result.session,
+            result.request,
+            choice === once ? 'approve' : choice === undefined ? 'cancel' : 'reject',
+            'pi-dialog',
+          );
+          if (outcome === 'approved') result = await handle('pi', input);
         }
       }
       // Pi records the reason as the whole tool result, so the prefix marks guard blocks for retros.

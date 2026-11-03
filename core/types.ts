@@ -293,11 +293,41 @@ export interface Receipt {
   at?: string;
 }
 
+// One approval request. `op` digests the exact operation, session, tree and revision;
+// `id` is unique to this issue of it, so a response to an expired issue never applies to
+// a later one. `summary` names the operation for an approval dialog and stays in the
+// private state file, never in the run log.
+// The Codex MCP tool that shows the user an approval dialog for a request.
+export const APPROVAL_TOOL = 'halvard_request_approval';
+
+export interface PendingRequest {
+  id: string;
+  op: string;
+  tree: string;
+  at: number;
+  issue: number;
+  root: string;
+  summary: string;
+  // The host's id for the tool call that was asked, for correlating its outcome.
+  call?: string | null;
+  // The issue this one replaced after it expired.
+  previous?: { id: string; at: number } | null;
+}
+
+export interface Grant {
+  id: string;
+  at: number;
+  via: ApprovalVia;
+}
+
+export type ApprovalVia = 'prompt' | 'terminal' | 'pi-dialog' | 'codex-elicitation';
+
 export interface WorkflowState {
   revision: number;
   pass: Receipt | null;
-  pending: { id: string; tree: string; at: number } | null;
-  approved: string | null;
+  pending: PendingRequest | null;
+  // A grant for the pending request. Older state files hold a bare id, which grants nothing.
+  approved: Grant | string | null;
   // The tool call that spent the last approval. Grok can run several Halvard entries
   // for one call; the others see the same call and do not ask again.
   consumed?: { id: string; call: string } | null;

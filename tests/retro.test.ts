@@ -227,7 +227,14 @@ test('retro counts each harness hook denial and ignores the same text elsewhere'
     ]),
   );
   const retro = await retroEvents(root, 'demo');
-  const empty = { denials: [], asks: [], approvals: 0, gatePasses: 0, gateFailures: [] };
+  const empty = {
+    denials: [],
+    asks: [],
+    approvals: 0,
+    outcomes: [],
+    gatePasses: 0,
+    gateFailures: [],
+  };
   assert.deepEqual(retro.events, {
     claude: {
       ...empty,

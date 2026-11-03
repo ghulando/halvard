@@ -64,7 +64,11 @@ try {
     pi?: { extensions?: string[]; skills?: string[] };
     bin?: Record<string, string>;
   };
-  const codexPlugin = manifest('.codex-plugin/plugin.json') as { skills?: string; hooks?: string };
+  const codexPlugin = manifest('.codex-plugin/plugin.json') as {
+    skills?: string;
+    hooks?: string;
+    mcpServers?: string;
+  };
   const grokPlugin = manifest('.grok-plugin/plugin.json') as { skills?: string; hooks?: string };
   const marketplace = manifest('.claude-plugin/marketplace.json') as {
     plugins?: { source?: string }[];
@@ -76,6 +80,7 @@ try {
     ...(marketplace.plugins ?? []).map((plugin) => plugin.source!),
     codexPlugin.skills!,
     codexPlugin.hooks!,
+    codexPlugin.mcpServers!,
     grokPlugin.skills!,
     grokPlugin.hooks!,
   ];
@@ -90,6 +95,16 @@ try {
     )) {
       targets.push(match[1]!);
     }
+  }
+  // The Codex approval server runs from the plugin root, as its cwd names.
+  const servers = (
+    manifest(codexPlugin.mcpServers!) as {
+      mcpServers: Record<string, { args?: string[]; cwd?: string }>;
+    }
+  ).mcpServers;
+  for (const server of Object.values(servers)) {
+    assert.equal(server.cwd, '.', 'Codex MCP server must run from the plugin root');
+    targets.push(...(server.args ?? []).filter((arg) => arg.endsWith('.ts')));
   }
   assert.ok(targets.length >= 8 && targets.every(Boolean), 'native manifests name no entry points');
   for (const target of targets) {
@@ -107,6 +122,8 @@ try {
     'docs/configuration.md',
     'docs/factory.md',
     'docs/troubleshooting.md',
+    'docs/install.md',
+    'docs/codex-approval-check.md',
     'UPSTREAM.md',
   ]) {
     const content = readFileSync(join(installed, doc), 'utf8');

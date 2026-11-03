@@ -50,7 +50,21 @@ test('metrics count tasks, first gates, reviews and guard friction', (t) => {
   assert.deepEqual(all.gate, { tasks: 2, firstPassRate: 50 });
   assert.deepEqual(all.review, { tasks: 2, firstRoundBlockRate: 50, reReviewRate: 50 });
   assert.deepEqual(all.guard!.asks, [
-    { reason: 'This command commits', count: 2, approved: 1, approvedRate: 50 },
+    {
+      reason: 'This command commits',
+      count: 2,
+      approved: 1,
+      approvedRate: 50,
+      rejected: 0,
+      declined: 0,
+      cancelled: 0,
+      expired: 0,
+      hostAllowed: 0,
+      unknown: 0,
+      repeats: 0,
+      refreshed: 0,
+      legacy: 2,
+    },
   ]);
   assert.equal(all.guard!.hookErrors, 1);
   assert.equal(all.guard!.denials.length, 2);
@@ -106,4 +120,73 @@ test('a window counts tasks that started in it, with their real first gate', (t)
   assert.deepEqual(result.tasks, { started: 1, done: 0, byMode: { solo: 1 } });
   // The new task's real first gate failed.
   assert.deepEqual(result.gate, { tasks: 1, firstPassRate: 0 });
+});
+
+test('metrics count asked operations once and only trusted outcomes as approvals', (t) => {
+  const root = repo(t);
+  const ask = (request: string, op: string, extra: Record<string, unknown> = {}) =>
+    [
+      'ask',
+      { session: 's1', harness: 'codex', reason: 'This command commits', request, op, ...extra },
+    ] as [string, Record<string, unknown>];
+  const outcome = (request: string, value: string, via = 'prompt') =>
+    ['outcome', { session: 's1', harness: 'codex', request, outcome: value, via }] as [
+      string,
+      Record<string, unknown>,
+    ];
+  events(t, root, [
+    // Asked, retried while waiting, then approved.
+    ask('r1', 'o1'),
+    ask('r1', 'o1', { repeat: true }),
+    outcome('r1', 'approved'),
+    // Expired, issued again, and the new request approved: one operation, one approval.
+    ask('r2', 'o2'),
+    outcome('r2', 'expired'),
+    ask('r3', 'o2', { refreshed: true }),
+    outcome('r3', 'approved', 'codex-elicitation'),
+    // Rejected in a dialog, cancelled, and one with no outcome.
+    ask('r4', 'o3'),
+    outcome('r4', 'rejected', 'codex-elicitation'),
+    ask('r5', 'o4'),
+    outcome('r5', 'cancelled', 'pi-dialog'),
+    ask('r6', 'o5'),
+    // Declined, by the user or the host's policy.
+    ask('r8', 'o7'),
+    outcome('r8', 'declined', 'codex-elicitation'),
+    // The approved operation asked again later on the same tree is a new operation.
+    ask('r9', 'o1'),
+    // Claude ran the exact asked call: host-allowed, not approved.
+    [
+      'ask',
+      { session: 's2', harness: 'claude', reason: 'This command commits', request: 'r7', op: 'o6' },
+    ],
+    [
+      'outcome',
+      {
+        session: 's2',
+        harness: 'claude',
+        request: 'r7',
+        outcome: 'host-allowed',
+        via: 'claude-native',
+      },
+    ],
+    // A later command running proves nothing: an outcome for an unknown request is ignored.
+    outcome('zz', 'approved'),
+  ]);
+  const [entry] = runMetrics(root).guard!.asks;
+  assert.deepEqual(entry, {
+    reason: 'This command commits',
+    count: 8,
+    approved: 2,
+    approvedRate: 25,
+    rejected: 1,
+    declined: 1,
+    cancelled: 1,
+    expired: 0,
+    hostAllowed: 1,
+    unknown: 2,
+    repeats: 1,
+    refreshed: 1,
+    legacy: 0,
+  });
 });

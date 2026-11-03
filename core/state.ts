@@ -9,6 +9,7 @@ import {
   openSync,
   readFileSync,
   readSync,
+  readdirSync,
   readlinkSync,
   realpathSync,
   renameSync,
@@ -43,9 +44,48 @@ export function privateDirectory(path: string) {
   return path;
 }
 
+const stateBase = () => privateDirectory(join(tmpdir(), `halvard-${process.getuid?.() ?? 'user'}`));
+
 export function stateDirectory(root: string) {
-  const base = privateDirectory(join(tmpdir(), `halvard-${process.getuid?.() ?? 'user'}`));
-  return privateDirectory(join(base, digest(root)));
+  return privateDirectory(join(stateBase(), digest(root)));
+}
+
+// The repository and session whose state holds this pending request. The id is a digest
+// of the session key and the operation, so it selects one session; it authorizes nothing.
+export function findPendingRequest(
+  id: string,
+  recent = 15 * 60 * 1000,
+): { root: string; key: string } | null {
+  if (!/^[a-f0-9]{64}$/.test(id)) return null;
+  const base = stateBase();
+  for (const folder of readdirSync(base)) {
+    if (!/^[a-f0-9]{64}$/.test(folder)) continue;
+    let files: string[];
+    try {
+      files = readdirSync(join(base, folder));
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      const match = file.match(/^([a-f0-9]{64})\.json$/);
+      if (!match) continue;
+      try {
+        // Only a state written recently can hold a request that has not expired.
+        const stat = lstatSync(join(base, folder, file));
+        if (!stat.isFile() || Date.now() - stat.mtimeMs > recent) continue;
+        const state = JSON.parse(readFileSync(join(base, folder, file), 'utf8')) as WorkflowState;
+        const pending = state.pending;
+        if (
+          pending?.id === id &&
+          typeof pending.root === 'string' &&
+          digest(pending.root) === folder
+        ) {
+          return { root: pending.root, key: match[1]! };
+        }
+      } catch {}
+    }
+  }
+  return null;
 }
 
 // Legacy directory locks have no owner record and are never reclaimed.

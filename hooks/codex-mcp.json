@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "halvard": {
+      "command": "node",
+      "args": ["bin/approval-mcp.ts"],
+      "cwd": ".",
+      "env": { "HALVARD_APPROVAL_HOST": "codex" }
+    }
+  }
+}

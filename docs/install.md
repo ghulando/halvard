@@ -39,6 +39,8 @@ codex plugin add halvard@ghulando
 
 Codex reads the same marketplace file as Claude Code, so the marketplace has the same name.
 
+The Codex plugin also declares a small MCP server, `halvard`, which shows Halvard's approval form (`hooks/codex-mcp.json`). It needs no network access, holds no credentials, and runs only when Codex starts it with the plugin's launch setting; the guard denies agents that try to start it. Codex may ask once before the agent first calls its `halvard_request_approval` tool; that prompt approves the tool call, not the Halvard request, which only the form's Approve once answer approves. [Codex approval dialog check](codex-approval-check.md) walks through the form in a live session.
+
 ### Pi
 
 ```sh

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { standardOutput } from './output.ts';
+import { APPROVAL_TOOL } from '../types.ts';
 import { claudeShaped } from './tool-input.ts';
 import { object, texts } from './transcript.ts';
 
@@ -75,8 +76,10 @@ export const codex: Driver = {
   settingsDir: '.codex',
   hooks: {
     payload: claudeShaped,
-    // Codex does not enforce ask, so a request for approval denies.
-    output: (event, result) => standardOutput(event, result, { askAsDeny: true }),
+    // Codex does not enforce ask, so a request for approval denies until it is approved.
+    // Halvard's MCP tool shows the user a dialog for it; see core/approval-mcp.ts.
+    output: (event, result) =>
+      standardOutput(event, result, { askAsDeny: true, dialog: APPROVAL_TOOL }),
   },
   agent: {
     command: ({ stage, output, extra }) => [

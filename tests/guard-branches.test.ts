@@ -572,3 +572,154 @@ test('Pi shipping on a protected branch gets only one-time approval', async (t) 
     'ask',
   );
 });
+
+test('approval expiry: distinct messages, refresh, grant lifetime and single use', async (t) => {
+  const root = fixture(t);
+  const start = Date.parse('2026-11-03T10:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now: start });
+  const at = (minutes: number) => t.mock.timers.setTime(start + minutes * 60 * 1000);
+  const tool = 'Bash';
+  const input = { command: 'git commit -m "notes"' };
+  const ask = () => call(root, 'codex', 'PreToolUse', tool, input);
+  const approve = async (id: string, session = 'test-session') =>
+    (
+      await call(root, 'codex', 'UserPromptSubmit', undefined, undefined, {
+        prompt: `approve halvard ${id}`,
+        session_id: session,
+      })
+    ).context!;
+
+  // Nothing waits yet.
+  assert.match(await approve('a'.repeat(64)), /no request is waiting/);
+  const first = await ask();
+  assert.match(first.reason!, /issued at \d\d:\d\d and expires at \d\d:\d\d/);
+  // A retry while it waits keeps the same id and expiry.
+  at(5);
+  const repeat = await ask();
+  assert.equal(repeat.request, first.request);
+  assert.equal(repeat.reason, first.reason);
+  // Another session cannot approve it, and an unknown id is not this one.
+  assert.match(await approve(first.request!, 'other-session'), /no request is waiting/);
+  assert.match(await approve('b'.repeat(64)), /not the one waiting/);
+  // The answer arrives after the request expired: nothing is approved.
+  at(11);
+  assert.match(await approve(first.request!), /expired at .*nothing was approved/);
+  assert.equal((await ask()).decision, 'ask');
+  // That retry issued a new request and says the old one expired.
+  const second = await ask();
+  assert.notEqual(second.request, first.request);
+  assert.match(second.reason!, /earlier request for this operation \([a-f0-9]{12}\) expired at/);
+  // The old response never applies to the newer request.
+  assert.match(await approve(first.request!), /replaced it/);
+  assert.equal((await ask()).request, second.request);
+  // A timely approval survives a retry after the request's own lifetime.
+  at(20);
+  assert.match(await approve(second.request!), /Approved workflow request/);
+  at(29);
+  assert.equal((await ask()).decision, undefined);
+  // Single use, and the spent id cannot be replayed.
+  assert.equal((await ask()).decision, 'ask');
+  assert.match(await approve(second.request!), /not the one waiting/);
+
+  // A grant left unused past its own lifetime lapses.
+  const third = await ask();
+  assert.match(await approve(third.request!), /Approved/);
+  at(29 + 11);
+  const lapsed = await ask();
+  assert.equal(lapsed.decision, 'ask');
+  assert.notEqual(lapsed.request, third.request);
+});
+
+test('an older state file with a bare approval grants nothing', async (t) => {
+  const root = fixture(t);
+  const tool = 'Bash';
+  const input = { command: 'git commit -m "notes"' };
+  const asked = await call(root, 'codex', 'PreToolUse', tool, input);
+  const { withState } = await import('../core/state.ts');
+  const key = sessionKey(realpathSync(root), 'codex', 'test-session');
+  await withState(realpathSync(root), key, (state) => {
+    state.approved = asked.request!;
+  });
+  assert.equal((await call(root, 'codex', 'PreToolUse', tool, input)).decision, 'ask');
+});
+
+test('Claude: the exact asked call reaching PostToolUse is logged as host-allowed', async (t) => {
+  const root = fixture(t);
+  const { eventFile, readEvents, repoLogDirectory } = await import('../core/events.ts');
+  const tool = 'Bash';
+  const input = { command: 'git commit -m "notes"' };
+  const asked = await call(root, 'claude', 'PreToolUse', tool, input, { tool_use_id: 'toolu_1' });
+  assert.equal(asked.decision, 'ask');
+  // Another call running proves nothing.
+  await call(root, 'claude', 'PostToolUse', tool, input, { tool_use_id: 'toolu_2' });
+  const log = () =>
+    readEvents(eventFile(repoLogDirectory(realpathSync(root)), null)).filter(
+      (event) => event.kind === 'outcome',
+    );
+  assert.equal(log().length, 0);
+  await call(root, 'claude', 'PostToolUse', tool, input, { tool_use_id: 'toolu_1' });
+  await call(root, 'claude', 'PostToolUse', tool, input, { tool_use_id: 'toolu_1' });
+  const outcomes = log();
+  assert.equal(outcomes.length, 1);
+  assert.equal(outcomes[0]!.outcome, 'host-allowed');
+  assert.equal(outcomes[0]!.via, 'claude-native');
+  assert.equal(outcomes[0]!.request, asked.request!.slice(0, 16));
+  // The ask that preceded it carries the same request.
+  const ask = readEvents(eventFile(repoLogDirectory(realpathSync(root)), null)).find(
+    (event) => event.kind === 'ask',
+  )!;
+  assert.equal(ask.request, outcomes[0]!.request);
+  assert.doesNotMatch(JSON.stringify(ask), /git commit/);
+});
+
+test('Pi dialog answers: Yes once approves one call; No and a dismissed dialog block', async (t) => {
+  const root = realpathSync(fixture(t));
+  const { answerDialog } = await import('../core/approval.ts');
+  const { loadProject } = await import('../core/project.ts');
+  const { eventFile, readEvents, repoLogDirectory } = await import('../core/events.ts');
+  const shell = { command: 'git commit -m x' };
+  const ask = () => call(root, 'pi', 'PreToolUse', 'bash', shell);
+  const answer = async (choice: 'approve' | 'reject' | 'cancel') => {
+    const asked = await ask();
+    assert.equal(asked.decision, 'ask');
+    return answerDialog(
+      loadProject(root),
+      'pi',
+      asked.session!,
+      asked.request!,
+      choice,
+      'pi-dialog',
+    );
+  };
+  assert.equal((await answer('reject')).outcome, 'rejected');
+  assert.equal((await answer('cancel')).outcome, 'cancelled');
+  assert.equal((await ask()).decision, 'ask');
+  assert.equal((await answer('approve')).outcome, 'approved');
+  assert.equal((await ask()).decision, undefined);
+  assert.equal((await ask()).decision, 'ask');
+  assert.deepEqual(
+    readEvents(eventFile(repoLogDirectory(root), null))
+      .filter((event) => event.kind === 'outcome')
+      .map((event) => [event.outcome, event.via]),
+    [
+      ['rejected', 'pi-dialog'],
+      ['cancelled', 'pi-dialog'],
+      ['approved', 'pi-dialog'],
+    ],
+  );
+});
+
+test('Claude: a host-allowed request is finished and cannot be approved afterwards', async (t) => {
+  const root = fixture(t);
+  const tool = 'Bash';
+  const input = { command: 'git commit -m "notes"' };
+  const first = await call(root, 'claude', 'PreToolUse', tool, input, { tool_use_id: 'c1' });
+  await call(root, 'claude', 'PostToolUse', tool, input, { tool_use_id: 'c1' });
+  const approval = await call(root, 'claude', 'UserPromptSubmit', undefined, undefined, {
+    prompt: `approve halvard ${first.request!}`,
+  });
+  assert.match(approval.context!, /no request is waiting/);
+  const second = await call(root, 'claude', 'PreToolUse', tool, input, { tool_use_id: 'c2' });
+  assert.equal(second.decision, 'ask');
+  assert.notEqual(second.request, first.request);
+});

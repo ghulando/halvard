@@ -26,7 +26,9 @@ Protected branches and plan mode allow only reads. Start a feature or fix branch
 
 ## Approval does not take
 
-Only commit, merge, push, publish and edits to protected workflow files ask. Pi shows a dialog, Claude Code and Grok use their native approval, and Codex prints a request id to approve with `approve halvard <request-id>`. The Cursor CLI does not enforce an ask and sends no prompt hook, so Halvard denies the call and prints a command such as `node <runner> approve <session-key> <request-id>`. Run it in the repository from your own terminal, then ask the agent to retry. The guard denies that command when an agent runs it. The retry must be the same operation in the same session on the same tree within ten minutes; anything else needs a new request.
+Only commit, merge, push, publish and edits to protected workflow files ask. Pi shows a dialog, Claude Code and Grok use their native approval, and Codex shows Halvard's approval form when the agent calls `halvard_request_approval`, or accepts `approve halvard <request-id>` as a chat message. The Cursor CLI does not enforce an ask and sends no prompt hook, so Halvard denies the call and prints a command such as `node <runner> approve <session-key> <request-id>`. Run it in the repository from your own terminal, then ask the agent to retry. The guard denies that command when an agent runs it. Approve a request within ten minutes of its issue, and retry within ten minutes of the approval. The retry must be the same operation in the same session on the same tree; anything else needs a new request. The approval reply says which case applies: no request waiting, a different request waiting, an expired request, a request replaced after it expired, or a changed tree. After an expiry, retry the operation and approve the new id it shows.
+
+If Codex does not show the approval form, check that the Halvard plugin's MCP server is enabled (`/mcp` lists `halvard`), that `approval_policy` is `on-request` or `untrusted`, and that no automatic approval reviewer is configured. The tool then says why and falls back to the text approval.
 
 ## The gate passed but completion is blocked
 

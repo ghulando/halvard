@@ -28,6 +28,8 @@ export interface RetroHarnessEvents {
   denials: RetroCount[];
   asks: RetroCount[];
   approvals: number;
+  // Other approval outcomes from the run log: rejected, cancelled, expired, host-allowed.
+  outcomes: RetroCount[];
   gatePasses: number;
   gateFailures: RetroCount[];
 }
@@ -134,6 +136,7 @@ export async function retroEvents(cwd: string, id: string): Promise<RetroEvents>
     denials: [],
     asks: [],
     approvals: 0,
+    outcomes: [],
     gatePasses: 0,
     gateFailures: [],
   });
@@ -187,8 +190,11 @@ export async function retroEvents(cwd: string, id: string): Promise<RetroEvents>
       }
       const reason = String(event.reason ?? '').slice(0, REASON_LIMIT);
       if (event.kind === 'deny') add(summary.denials, reason);
-      else if (event.kind === 'ask') add(summary.asks, reason);
+      // A retry while the request waits repeats it; it is not another ask.
+      else if (event.kind === 'ask' && event.repeat !== true) add(summary.asks, reason);
       else if (event.kind === 'approval') summary.approvals++;
+      else if (event.kind === 'outcome' && event.outcome === 'approved') summary.approvals++;
+      else if (event.kind === 'outcome') add(summary.outcomes, String(event.outcome));
       else if (event.kind === 'gate' && event.passed === true) summary.gatePasses++;
       else if (event.kind === 'gate') add(summary.gateFailures, reason || 'other');
     }

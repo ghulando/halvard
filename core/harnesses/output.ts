@@ -6,11 +6,12 @@ import type { HookResult, NativeHookOutput } from '../types.ts';
 export function standardOutput(
   event: string | undefined,
   result: HookResult,
-  { askAsDeny = false, topLevel = false } = {},
+  { askAsDeny = false, topLevel = false, dialog = '' } = {},
 ): NativeHookOutput {
   if (result.decision) {
+    // A host with an approval dialog tool names it first; the text approval always works.
     const reason = result.request
-      ? `${result.reason}\nTo approve this one operation, send exactly: approve halvard ${result.request}`
+      ? `${result.reason}\n${dialog ? `To ask the user, call the ${dialog} tool with request ${result.request}; it shows them an approval dialog. Otherwise the user ` : 'To approve this one operation, '}send${dialog ? 's' : ''} exactly: approve halvard ${result.request}`
       : result.reason;
     return {
       ...(topLevel ? { decision: result.decision, reason } : {}),

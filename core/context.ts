@@ -85,7 +85,7 @@ export function startupContext(
     ...(project.config.workflow.requireReview
       ? [`Run independent review with: ${reviewCall}`]
       : []),
-    'An approval request can be approved by sending exactly: approve halvard <request-id>. Only the pending operation is authorized, once, on the same tree.',
+    'An approval request can be approved by sending exactly: approve halvard <request-id>. Only the pending operation is authorized, once, on the same tree. In Codex, call the halvard_request_approval tool with the request id to show the user an approval dialog; only the user answers it.',
     'Report which project skills you loaded. Read applicable on-demand skills before writing code. Follow project review and invariant requirements before marking done.',
     `Read the halvard skill before implementation tasks: ${workflow!.file}. Substantial tasks get a short plan before coding; small clear fixes proceed directly. Keep task progress portable across harnesses.`,
     `Personal workflow: ${JSON.stringify(project.config.workflow)}. Repo settings override personal defaults. Reviewer selection is explicit; never silently use self-review.`,

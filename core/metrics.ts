@@ -15,10 +15,44 @@ export interface ReasonCount {
 }
 
 export interface AskCount extends ReasonCount {
-  // Asks that the same session's next approval answered: friction when it is near 100%.
+  // `count` is distinct operations asked. An agent retrying while a request waits repeats
+  // it, and an expired request issued again refreshes it; neither adds to the count.
+  // `approved` is operations a trusted answer approved: friction when it is near 100%.
   approved: number;
   approvedRate: number | null;
+  rejected: number;
+  // Declined in a dialog, by the user or by the host's approval policy.
+  declined: number;
+  cancelled: number;
+  expired: number;
+  // The host ran the exact asked call after its own dialog; not a verified user approval.
+  hostAllowed: number;
+  // No outcome reached the log.
+  unknown: number;
+  repeats: number;
+  refreshed: number;
+  // Asks from logs written before requests were recorded, matched by session as before.
+  legacy: number;
 }
+
+type Outcome = 'approved' | 'rejected' | 'declined' | 'cancelled' | 'expired' | 'hostAllowed';
+// When one operation saw several outcomes, the strongest counts.
+const OUTCOMES: Outcome[] = [
+  'approved',
+  'hostAllowed',
+  'rejected',
+  'declined',
+  'cancelled',
+  'expired',
+];
+const OUTCOME_NAMES: Record<string, Outcome> = {
+  approved: 'approved',
+  rejected: 'rejected',
+  declined: 'declined',
+  cancelled: 'cancelled',
+  expired: 'expired',
+  'host-allowed': 'hostAllowed',
+};
 
 const DAY = 24 * 3600 * 1000;
 
@@ -87,27 +121,70 @@ export function runMetrics(
   const all = [...loose, ...tasks.flatMap(({ events }) => events)]
     .filter(keep)
     .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-  // The ask a session is waiting on, until its next approval or ask.
+  // Each asked operation with the outcomes its requests received. An operation is keyed
+  // by its op digest and first request: the same op asked again after an earlier request
+  // finished is a new operation, while a reissue after expiry continues the last one.
+  const operations = new Map<string, { entry: AskCount; outcomes: Set<Outcome> }>();
+  const requests = new Map<string, string>();
+  const latest = new Map<string, string>();
+  // Legacy: the ask a session is waiting on, until its next approval or ask.
   const waiting = new Map<string, AskCount>();
+  const askEntry = (reason: string) =>
+    count(asks, reason, () => ({
+      reason,
+      count: 0,
+      approved: 0,
+      approvedRate: null,
+      rejected: 0,
+      declined: 0,
+      cancelled: 0,
+      expired: 0,
+      hostAllowed: 0,
+      unknown: 0,
+      repeats: 0,
+      refreshed: 0,
+      legacy: 0,
+    }));
   for (const event of all) {
     const reason = String(event.reason ?? '');
     if (event.kind === 'deny') {
       if (reason === 'hook error') hookErrors++;
       count(denials, reason, () => ({ reason, count: 0 })).count++;
+    } else if (event.kind === 'ask' && typeof event.request === 'string') {
+      const entry = askEntry(reason);
+      const op = typeof event.op === 'string' ? event.op : event.request;
+      const known = requests.get(event.request) ?? latest.get(op);
+      if (event.repeat === true && requests.has(event.request)) {
+        entry.repeats++;
+      } else if (event.refreshed === true && known && operations.has(known)) {
+        entry.refreshed++;
+        requests.set(event.request, known);
+      } else {
+        const key = `${op}:${event.request}`;
+        entry.count++;
+        operations.set(key, { entry, outcomes: new Set() });
+        requests.set(event.request, key);
+        latest.set(op, key);
+      }
     } else if (event.kind === 'ask') {
-      const entry = count(asks, reason, () => ({
-        reason,
-        count: 0,
-        approved: 0,
-        approvedRate: null,
-      }));
+      const entry = askEntry(reason);
       entry.count++;
+      entry.legacy++;
       if (typeof event.session === 'string') waiting.set(event.session, entry);
+    } else if (event.kind === 'outcome' && typeof event.request === 'string') {
+      const op = requests.get(event.request);
+      const outcome = OUTCOME_NAMES[String(event.outcome)];
+      if (op && outcome) operations.get(op)?.outcomes.add(outcome);
     } else if (event.kind === 'approval' && typeof event.session === 'string') {
       const entry = waiting.get(event.session);
       if (entry) entry.approved++;
       waiting.delete(event.session);
     }
+  }
+  for (const { entry, outcomes } of operations.values()) {
+    const outcome = OUTCOMES.find((name) => outcomes.has(name));
+    if (outcome) entry[outcome]++;
+    else entry.unknown++;
   }
   for (const entry of asks) entry.approvedRate = rate(entry.approved, entry.count);
   const byCount = (a: ReasonCount, b: ReasonCount) => b.count - a.count;

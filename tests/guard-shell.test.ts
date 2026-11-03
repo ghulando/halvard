@@ -761,3 +761,145 @@ for (const harness of ['pi', 'claude', 'codex']) {
     await assert.rejects(call(root, harness, 'PreToolUse', tool, input), /too large to verify/);
   });
 }
+
+test('branch queries read on a protected branch and in review; branch changes do not', async (t) => {
+  const root = fixture(t);
+  execFileSync('git', ['checkout', '-q', '-b', 'main'], { cwd: root });
+  const bash = (command: string, extra = {}) =>
+    call(root, 'codex', 'PreToolUse', 'Bash', { command }, extra);
+  for (const command of [
+    'git branch --no-merged main',
+    'git branch --merged main',
+    'git branch --merged',
+    'git branch --merged=main',
+    'git branch -a --no-merged origin/main',
+    'git branch -vv',
+    'git branch -v --verbose',
+    'git branch --contains HEAD~1',
+    'git branch --points-at HEAD',
+    "git branch --list 'feature/*'",
+    'git branch --merged main --sort=-committerdate',
+  ]) {
+    assert.equal((await bash(command)).decision, undefined, command);
+    assert.equal(
+      (await bash(command, { permission_mode: 'plan' })).decision,
+      undefined,
+      `${command} in review`,
+    );
+  }
+  for (const command of [
+    'git branch feature/new',
+    'git branch -m old new',
+    'git branch -M new',
+    'git branch -D feature/x',
+    'git branch -f feature/x HEAD',
+    'git branch -c a b',
+    'git branch --set-upstream-to origin/main',
+    'git branch -u origin/main',
+    'git branch --unset-upstream',
+    'git branch --edit-description',
+    'git branch --track feature/x origin/x',
+    'git branch -l feature/x',
+    'git branch --show-current feature/x',
+    'git branch --merged -d feature/x',
+  ]) {
+    assert.equal((await bash(command)).decision, 'deny', command);
+    assert.equal((await bash(command, { permission_mode: 'plan' })).decision, 'deny', command);
+  }
+  // Deleting a merged branch still asks.
+  assert.equal((await bash('git branch -d feature/x')).decision, 'ask');
+});
+
+test('shipping words in data do not ask; shipping commands and scripts still do', async (t) => {
+  const root = fixture(t);
+  const bash = (command: string) => call(root, 'claude', 'PreToolUse', 'Bash', { command });
+  for (const command of [
+    // The PCH task 06 shape: a Python heredoc writing task notes.
+    "python3 - <<'PY'\nfrom pathlib import Path\nPath('docs/tasks/06.md').write_text('''ClassificationRepository.publish is called by the worker.\nWe do not deploy or push from this task; `publish` stays internal.\n''')\nPY",
+    "cat > docs/notes.md <<'EOF'\n## Deploy\nThen git push origin main.\nEOF",
+    'echo "do not push" > notes.md',
+    "rg 'publish' src",
+    'rg -n "ClassificationRepository.publish" src',
+    "grep -rn 'deploy' docs",
+    'git log --grep=release',
+    "sed -i 's/publish/release/' docs/a.md",
+    'python3 -c "import notes; notes.deploy_docs()"',
+  ]) {
+    const result = await bash(command);
+    assert.equal(result.decision, undefined, `${command}: ${result.reason}`);
+  }
+  for (const command of [
+    "python3 - <<'PY'\nimport subprocess\nsubprocess.run(['git', 'push'])\nPY",
+    "python3 -c \"import os; os.system('git ' + 'push')\"",
+    "node -e \"require('child_process').execSync('npm publish')\"",
+    "bash <<'EOF'\ngit push origin main\nEOF",
+    "cat <<'EOF' | sh\nnpm publish\nEOF",
+    "ssh host <<'EOF'\ngit push\nEOF",
+    './scripts/deploy.sh',
+    'bash scripts/release.sh',
+    'env CI=1 npm publish',
+    "sh -c 'npm publish'",
+    'npm test && git commit -m x',
+    'git commit -m "publish docs"',
+  ]) {
+    const result = await bash(command);
+    assert.equal(result.decision, 'ask', command);
+    assert.match(result.reason!, /^This command commits, merges, pushes or publishes\./, command);
+  }
+  // Uncertain classification asks and says so.
+  for (const [command, why] of [
+    [
+      "python3 - <<'PY'\nimport requests\nrequests.post('https://example.invalid/publish')\nPY",
+      /runs a script that starts programs or uses the network, and the script mentions "publish"/,
+    ],
+    ['make $TARGET deploy', /could not be fully parsed, and it contains the word "deploy"/],
+    ["mysql db <<'EOF'\nselect 'deploy'\nEOF", /passes text that mentions "deploy" to a program/],
+  ] as const) {
+    const result = await bash(command);
+    assert.equal(result.decision, 'ask', command);
+    assert.match(
+      result.reason!,
+      /^Halvard cannot tell whether this command commits, merges, pushes or publishes\.\n/,
+    );
+    assert.match(result.reason!, why, command);
+  }
+});
+
+test('heredoc and pipe tricks keep shipping protection', async (t) => {
+  const root = fixture(t);
+  const bash = (command: string) => call(root, 'claude', 'PreToolUse', 'Bash', { command });
+  for (const command of [
+    // A quoted, commented, escaped or here-string << opens no heredoc.
+    "echo '<<EOF'\ngit push\nEOF",
+    'echo "<<EOF"\ngit push\nEOF',
+    'cat <<<EOF\ngit push\nEOF',
+    'true # <<EOF\ngit push\nEOF',
+    'echo x \\<<EOF\ngit push\nEOF',
+    // Without a quoted delimiter the body's substitutions run.
+    'cat <<EOF\n$(git push)\nEOF',
+    'cat <<EOF\n`git push`\nEOF',
+    // Written to a file and run, or into shell startup.
+    'cat <<EOF > x.sh && sh x.sh\ngit push\nEOF',
+    'tee x.sh <<EOF && bash x.sh\ngit push\nEOF',
+    'cat <<EOF >> ~/.bashrc\ngit push\nEOF',
+    // In arithmetic, << is a shift, not a heredoc.
+    'echo $((1<<EOF))\ngit push\nEOF',
+    // Written into a hook that runs later.
+    'cat <<EOF > .git/hooks/pre-commit\ngit push\nEOF',
+    'cat <<EOF > .husky/pre-commit\nnpm publish\nEOF',
+    // Text piped into a shell or interpreter.
+    'grep push x | sh',
+    "echo 'git push' | sh",
+    "printf 'git push\\n' | bash",
+    'echo \'import os; os.system("git push")\' | python3',
+    // Wrappers and inline-code flags.
+    'timeout 5 ./deploy.sh',
+    'nice -n 5 ./deploy.sh',
+    'node --eval=\'require("child_process").execSync("git push")\'',
+    'python3 -Ic \'import os; os.system("npm publish")\'',
+  ]) {
+    assert.equal((await bash(command)).decision, 'ask', command);
+  }
+  // A quoted delimiter keeps the body literal for a reader.
+  assert.equal((await bash("cat > notes.md <<'EOF'\n$(git push)\nEOF")).decision, undefined);
+});

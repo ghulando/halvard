@@ -3,5 +3,6 @@
   "version": "0.0.1",
   "description": "Personal development assistant with workflow guards for Pi, Claude Code, Codex, Grok and Cursor",
   "skills": "./skills/",
-  "hooks": "./hooks/codex.json"
+  "hooks": "./hooks/codex.json",
+  "mcpServers": "./hooks/codex-mcp.json"
 }

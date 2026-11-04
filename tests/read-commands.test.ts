@@ -28,6 +28,8 @@ const reads = [
   'git diff -- src/*.mjs',
   'sort -- src/*.txt',
   'ls src/*.mjs | head -20',
+  'nl -ba README.md',
+  'nl -ba src/*.mjs | head -20',
 ];
 
 const denied = [
@@ -54,6 +56,8 @@ const denied = [
   "sed -n '$p' -i source.txt",
   'ps -axo pid > output',
   'cat "$FILE"',
+  'nl -ba README.md > numbered.txt',
+  'nl -ba "$FILE"',
 ];
 
 test('common read commands are accepted while option/glob/execute lookalikes stay guarded', () => {

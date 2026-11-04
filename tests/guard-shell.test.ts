@@ -307,6 +307,7 @@ test('common read commands are reads and lookalike writes are not', async (t) =>
     'sed -n 1,5p source.txt',
     'git log --oneline --no-textconv',
     'sort -r source.txt',
+    'nl -ba source.txt',
   ]) {
     assert.equal(
       (await call(root, 'claude', 'PreToolUse', 'Bash', { command }, { permission_mode: 'plan' }))
@@ -320,6 +321,7 @@ test('common read commands are reads and lookalike writes are not', async (t) =>
     'sort -o out *.txt',
     'git checkout *.txt',
     'cat source.txt > out.txt',
+    'nl -ba source.txt > out.txt',
     'ls 2>/tmp/errors',
     'cd core && rm x',
     'git branch -D x',

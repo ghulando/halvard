@@ -520,6 +520,20 @@ test('merging and deleting a merged branch on a protected branch ask instead of 
   }
 });
 
+test('line-numbered reads run on a protected branch; redirected ones do not', async (t) => {
+  const root = fixture(t);
+  execFileSync('git', ['checkout', '-q', '-b', 'main'], { cwd: root });
+  const bash = (command: string) => call(root, 'claude', 'PreToolUse', 'Bash', { command });
+  for (const command of ['cat source.txt', 'nl -ba source.txt', 'nl source.txt | head -5']) {
+    assert.equal((await bash(command)).decision, undefined, command);
+  }
+  for (const command of ['nl -ba source.txt > out.txt', 'nl -ba source.txt | tee out.txt']) {
+    const result = await bash(command);
+    assert.equal(result.decision, 'deny', command);
+    assert.match(result.reason!, /No work on protected branch main/, command);
+  }
+});
+
 test('a shipping command denied on a protected branch says how to run it', async (t) => {
   const root = fixture(t);
   execFileSync('git', ['checkout', '-q', '-b', 'main'], { cwd: root });

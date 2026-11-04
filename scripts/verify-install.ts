@@ -123,7 +123,6 @@ try {
     'docs/factory.md',
     'docs/troubleshooting.md',
     'docs/install.md',
-    'docs/codex-approval-check.md',
     'UPSTREAM.md',
   ]) {
     const content = readFileSync(join(installed, doc), 'utf8');

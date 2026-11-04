@@ -587,6 +587,7 @@ export const isShipping = (text: string, readCommands: ReadCommand[] = [], root?
 
 const READERS = new Set([
   'cat',
+  'nl',
   'head',
   'tail',
   'ls',
@@ -621,6 +622,7 @@ const READERS = new Set([
 // options can neither write nor execute.
 const GLOB_READERS = new Set([
   'cat',
+  'nl',
   'head',
   'tail',
   'ls',

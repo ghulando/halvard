@@ -1,13 +1,14 @@
 import type { TestContext } from 'node:test';
 import type { ToolInput, HookPayload } from '../core/types.ts';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { handle } from '../core/runtime.ts';
 
 export function fixture(t: TestContext, overrides = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'workflow-test-'));
+  // Canonical, so paths match the runtime's where tmpdir is a symlink, as /var is on macOS.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'workflow-test-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   execFileSync('git', ['init', '-q', '--initial-branch=feature/test'], { cwd: root });
   writeFileSync(

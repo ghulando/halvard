@@ -246,6 +246,8 @@ for (const harness of ['pi', 'claude', 'codex']) {
       'web.run',
       'web__run',
       'clock__curr_time',
+      'clocksleep',
+      'view_image',
     ]) {
       const payload = {
         cwd: root,

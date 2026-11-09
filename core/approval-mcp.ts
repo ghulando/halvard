@@ -55,14 +55,15 @@ function codexConfigFiles(root: string) {
 }
 
 // A dialog cannot reach the user when Codex declines every elicitation (approval_policy
-// never) or when an automatic reviewer answers approvals instead of the user.
-export function dialogBlocked(files: string[]) {
+// never) or when an automatic reviewer answers approvals instead of the user. A live mode
+// from the hook outranks the files' approval_policy, which the session may have changed.
+export function dialogBlocked(files: string[], liveMode = false) {
   for (const file of files) {
     if (!existsSync(file)) continue;
     const lines = readFileSync(file, 'utf8')
       .split('\n')
       .map((line) => line.replace(/#.*$/, '').trim());
-    if (lines.some((line) => /^approval_policy\s*=\s*["']never["']/.test(line))) {
+    if (!liveMode && lines.some((line) => /^approval_policy\s*=\s*["']never["']/.test(line))) {
       return 'Codex is configured with approval_policy = "never", which declines approval dialogs.';
     }
     if (lines.some((line) => /guardian|auto[_-]?review/i.test(line))) {
@@ -138,7 +139,15 @@ export function approvalServer({
     if (!elicitation) {
       return fallback(id, 'This Codex session cannot show approval dialogs.');
     }
-    const blocked = dialogBlocked(configFiles(project.root));
+    // The config files miss a mode the user picked in the session, such as Full Access,
+    // under which Codex declines the form by itself; the hook recorded the live mode.
+    if (pending.mode === 'bypassPermissions' || pending.mode === 'dontAsk') {
+      return fallback(
+        id,
+        `This Codex session runs without approval prompts (${pending.mode}), so it would decline the dialog.`,
+      );
+    }
+    const blocked = dialogBlocked(configFiles(project.root), Boolean(pending.mode));
     if (blocked) return fallback(id, blocked);
     let branch = 'unknown';
     try {

@@ -190,6 +190,46 @@ test('without a dialog the tool falls back to the text approval and approves not
   assert.equal((await call(root, 'codex', 'PreToolUse', ...commit)).decision, undefined);
 });
 
+test('a session switched to no approval prompts gets the text approval, not a dialog', async (t) => {
+  const root = fixture(t);
+  const approve = { action: 'accept', content: { decision: 'approve_once' } };
+  // The config file still says never; the live mode the hook recorded decides.
+  const dir = mkdtempSync(join(tmpdir(), 'codex-config-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const never = join(dir, 'never.toml');
+  writeFileSync(never, 'approval_policy = "never"\n');
+  const guardian = join(dir, 'guardian.toml');
+  writeFileSync(guardian, 'approvals_reviewer = "guardian_subagent"\n');
+  const files = [never];
+  for (const mode of ['bypassPermissions', 'dontAsk']) {
+    const result = await call(root, 'codex', 'PreToolUse', ...commit, {
+      session_id: 'test-session',
+      permission_mode: mode,
+    });
+    const { tool, sent } = await client(t, root, approve, { files });
+    const answer = await tool({ request: result.request });
+    assert.equal(answer.error, true);
+    assert.match(answer.text, new RegExp(`\\(${mode}\\).*approve halvard ${result.request}`, 's'));
+    assert.equal(sent.filter((message) => message.method === 'elicitation/create').length, 0);
+  }
+  // The same operation asked again after the user restores prompts shows the dialog.
+  const again = await call(root, 'codex', 'PreToolUse', ...commit, {
+    session_id: 'test-session',
+    permission_mode: 'default',
+  });
+  // An automatic reviewer still blocks the dialog whatever the live mode.
+  const reviewed = await client(t, root, approve, { files: [guardian] });
+  assert.match((await reviewed.tool({ request: again.request })).text, /automatic approval/);
+  assert.equal(
+    reviewed.sent.filter((message) => message.method === 'elicitation/create').length,
+    0,
+  );
+  const { tool, sent } = await client(t, root, approve, { files });
+  assert.match((await tool({ request: again.request })).text, /approved request/);
+  assert.equal(sent.filter((message) => message.method === 'elicitation/create').length, 1);
+  assert.equal((await call(root, 'codex', 'PreToolUse', ...commit)).decision, undefined);
+});
+
 test('dialogBlocked ignores comments and reads both config files', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'codex-config-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

@@ -641,7 +641,11 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
     let refreshed = false;
     if (pending?.op === op && now - pending.at <= REQUEST_TTL) {
       // The same operation asked again within its lifetime keeps its id and expiry.
-      current = { ...pending, call: toolCall ?? pending.call ?? null };
+      current = {
+        ...pending,
+        call: toolCall ?? pending.call ?? null,
+        mode: payload.permission_mode ?? null,
+      };
     } else {
       const again = pending?.op === op;
       refreshed = again;
@@ -654,6 +658,7 @@ async function decide(harness: string | undefined, raw: unknown): Promise<HookRe
         root,
         summary: operationSummary(payload, action),
         call: toolCall,
+        mode: payload.permission_mode ?? null,
         previous: again ? { id: pending.id, at: pending.at } : null,
       };
     }

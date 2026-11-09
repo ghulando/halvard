@@ -45,6 +45,11 @@ const READ_TOOLS = new Set([
   'web_search',
   'clock__curr_time',
   'clock.curr_time',
+  // Codex names its namespaced sleep tool clocksleep in its own denial messages.
+  'clocksleep',
+  'clock__sleep',
+  'clock.sleep',
+  'view_image',
   'ExitPlanMode',
   'EnterPlanMode',
   'TodoWrite',

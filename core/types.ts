@@ -310,6 +310,8 @@ export interface PendingRequest {
   summary: string;
   // The host's id for the tool call that was asked, for correlating its outcome.
   call?: string | null;
+  // The host's permission mode when the operation last asked; the user can change it mid-session.
+  mode?: string | null;
   // The issue this one replaced after it expired.
   previous?: { id: string; at: number } | null;
 }

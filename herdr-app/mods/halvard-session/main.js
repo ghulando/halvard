@@ -11,6 +11,15 @@ import { panes, props, run, shared, theme } from "herdr";
 
 const ROLE = { lead: "jarl", dev: "smith", reviewer: "skald", investigator: "seer" };
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// "13:22" today, else "12 Nov".
+const clock = (time) => {
+  const d = new Date(time);
+  if (d.toDateString() !== new Date().toDateString()) return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
 function icon(p, size, color) {
   if (!p?.icon) return null;
   return p.tint ? svg(p.icon).size(size).flex_none().text_color(color) : image(p.icon).w(size).h(size).flex_none();
@@ -91,7 +100,8 @@ export default class Session extends View {
       .child(div().flex_none().truncate().max_w(200).font_medium().text_color(t.foreground).child(name))
       .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(p.branch ?? ""))
       .when(Boolean(v?.gate), (el) =>
-        el.child(this.chip(t, v.gate.passed ? "gate held" : "gate fell", v.gate.passed ? t.done : t.blocked)),
+        // The time tells an old pass from a fresh one: the log does not see later edits.
+        el.child(this.chip(t, `gate ${v.gate.passed ? "held" : "fell"} ${clock(v.gate.at)}`, v.gate.passed ? t.done : t.blocked)),
       )
       .when(Boolean(v?.review), (el) =>
         el.child(

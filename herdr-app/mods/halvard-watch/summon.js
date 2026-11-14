@@ -1,72 +1,95 @@
 // Opens the "hall" tab for the team saved in a repository's .halvard.json:
-//   lead | dev
-//        | reviewer | investigator (when configured)
+//   lead         | dev
+//   investigator | reviewer      (the investigator's corner only when configured)
 // Each pane starts its harness. run() returns nothing and the new pane reaches panes()
 // only on a later frame, so the summon waits for a pane that was not there before.
-// pane.split takes no argv, so splits focus their neighbour and use terminal.open.
-// Pane roles go to shared "halvard.roles" for the pane headers.
+// pane.split takes no argv, so each split focuses its neighbour, waits until it has focus,
+// and uses terminal.open with a place. Pane roles go to shared "halvard.roles" for the pane
+// headers. A hall whose lead pane is still open in the repository is focused, not reopened.
 
-import { panes, readTextFile, run, setShared, shared } from "herdr";
+import { focused, panes, readTextFile, run, setShared, shared } from "herdr";
+import { validTeam } from "./rules.js";
 
 // Cursor's terminal agent is cursor-agent; the other harnesses run under their own name.
-const argv = (harness) => (harness === "cursor" ? ["cursor-agent"] : [harness]);
+const command = (harness) => (harness === "cursor" ? "cursor-agent" : harness);
 
 export const TEAM_HELP = "halvard team set --lead <harness> --dev <harness> --reviewer <harness>";
 
-// Halvard's harnesses, and its rules for a team: core/config/team.ts.
-const HARNESSES = ["pi", "claude", "codex", "grok", "cursor"];
-const isHarness = (value) => HARNESSES.includes(value);
+// How long a new pane or a focus change may take to show up.
+const WAIT = 3000;
+const STEP = 50;
 
-// The team saved in the repository's .halvard.json, or null when it has no valid one.
+// The team saved in the repository's .halvard.json, or null when Halvard would refuse it.
 export async function readTeam(root) {
-  let team = null;
   try {
-    team = JSON.parse((await readTextFile(`${root}/.halvard.json`)) ?? "null")?.team ?? null;
+    return validTeam(JSON.parse((await readTextFile(`${root}/.halvard.json`)) ?? "null")?.team);
   } catch {
     return null;
   }
-  if (!team || ![team.lead, team.dev, team.reviewer].every(isHarness)) return null;
-  if (team.investigator != null && !isHarness(team.investigator)) return null;
-  if (team.lead === team.dev || team.reviewer === team.dev) return null;
-  return team;
 }
 
-// Returns null when the hall opened, else what stopped it.
+const inside = (root) => (pane) => pane.cwd === root || pane.cwd?.startsWith(`${root}/`);
+
+// Returns null when the hall opened or was already open, else what stopped it.
 export async function summon(root, cx) {
   const team = await readTeam(root);
   if (!team) return `This repository has no valid team. Save one with: ${TEAM_HELP}`;
 
-  // A split's new pane is looked for in the hall's tab only, so a pane opened elsewhere
-  // meanwhile is never taken for it.
-  const open = async (command, args, tab = null) => {
-    const before = new Set(panes().map((p) => p.pane));
-    run(command, args);
-    for (let waited = 0; waited < 3000; waited += 50) {
-      const pane = panes().find((p) => !before.has(p.pane) && (!tab || p.tab === tab))?.pane;
-      if (pane) return pane;
-      await cx.sleep(50);
+  const live = panes();
+  const roles = Object.fromEntries(
+    Object.entries(shared("halvard.roles") ?? {}).filter(([pane]) => live.some((p) => p.pane === pane)),
+  );
+  const open = live.find((p) => roles[p.pane] === "lead" && inside(root)(p));
+  if (open) {
+    run("pane.focus", { pane: open.pane });
+    return null;
+  }
+
+  const waitFor = async (found) => {
+    for (let waited = 0; waited < WAIT; waited += STEP) {
+      const value = found();
+      if (value) return value;
+      await cx.sleep(STEP);
     }
     return null;
   };
-  let hall = null;
-  const split = (pane, place, harness) => {
-    run("pane.focus", { pane });
-    return open("terminal.open", { argv: argv(harness), folder: root, place }, hall);
+  // A new pane: the lead's must be in a tab that did not exist, a split's in the hall's tab,
+  // so a pane opened elsewhere meanwhile is never taken for one of the hall's.
+  const newPane = async (name, args, inTab) => {
+    const before = new Set(panes().map((p) => p.pane));
+    const tabs = new Set(panes().map((p) => p.tab));
+    run(name, args);
+    return waitFor(
+      () =>
+        panes().find((p) => !before.has(p.pane) && (inTab ? p.tab === inTab : !tabs.has(p.tab)))?.pane ?? null,
+    );
   };
-  const live = new Set(panes().map((p) => p.pane));
-  const roles = Object.fromEntries(Object.entries(shared("halvard.roles") ?? {}).filter(([pane]) => live.has(pane)));
+  let hall = null;
+  const split = async (pane, place, harness) => {
+    run("pane.focus", { pane });
+    if (!(await waitFor(() => focused()?.pane === pane))) return null;
+    return newPane("terminal.open", { argv: [command(harness)], folder: root, place }, hall);
+  };
 
-  const lead = await open("tab.new", { name: "hall", folder: root, argv: argv(team.lead) });
-  if (!lead) return "Herdr did not open the hall tab.";
+  const lead = await newPane("tab.new", { name: "hall", folder: root, argv: [command(team.lead)] }, null);
+  if (!lead) return `Herdr did not open the hall tab. Is ${command(team.lead)} installed and on PATH?`;
   hall = panes().find((p) => p.pane === lead)?.tab ?? null;
   roles[lead] = "lead";
   const dev = await split(lead, "right", team.dev);
   if (dev) roles[dev] = "dev";
   const reviewer = dev && (await split(dev, "down", team.reviewer));
   if (reviewer) roles[reviewer] = "reviewer";
-  const investigator = reviewer && team.investigator && (await split(reviewer, "right", team.investigator));
+  const investigator = team.investigator && (await split(lead, "down", team.investigator));
   if (investigator) roles[investigator] = "investigator";
   setShared("halvard.roles", roles);
   run("pane.focus", { pane: lead });
-  return dev && reviewer && (!team.investigator || investigator) ? null : "Herdr did not open every pane of the hall.";
+
+  const missing = [
+    ["dev", team.dev, dev],
+    ["reviewer", team.reviewer, reviewer],
+    ["investigator", team.investigator, investigator],
+  ].filter(([, harness, pane]) => harness && !pane);
+  if (!missing.length) return null;
+  const names = missing.map(([role, harness]) => `the ${role} (${command(harness)})`).join(", ");
+  return `Herdr did not open ${names}. Check that each is installed and on PATH.`;
 }

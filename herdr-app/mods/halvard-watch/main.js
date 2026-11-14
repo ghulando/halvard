@@ -9,7 +9,7 @@ import { View, div, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { exec, focused, panes, readTextFile, setShared, shared, spaces, theme, watchFolder } from "herdr";
 import * as fs from "fs/promises";
-import { FEED, parseEvents, summarize } from "./log.js";
+import { FEED, appendEvents, summarize, verdicts } from "./log.js";
 import { readTeam, summon } from "./summon.js";
 import { readTask } from "./task.js";
 
@@ -79,19 +79,27 @@ async function logDir(logs, root) {
   return null;
 }
 
+// The task folders in a log folder.
+async function subfolders(dir) {
+  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  return entries.filter((entry) => entry.isDirectory()).map((entry) => `${dir}/${entry.name}`);
+}
+
+// Each log file's last parse, so a change parses only the lines appended since.
+const parsed = new Map();
+
 // Every event in a log folder: the repository's file and one file per task. The streak,
-// tallies and latest verdicts need the whole history, so no file is tailed.
+// tallies and latest verdicts need the whole history, so every file is read, but only its
+// new lines are parsed.
 async function readLog(dir) {
-  const files = [`${dir}/events.jsonl`];
-  for (const entry of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
-    if (entry.isDirectory()) files.push(`${dir}/${entry.name}/events.jsonl`);
-  }
-  let text = "";
+  const files = [`${dir}/events.jsonl`, ...(await subfolders(dir)).map((folder) => `${folder}/events.jsonl`)];
+  const events = [];
   for (const file of files) {
-    // A newline after each file keeps a torn last line from swallowing the next file's first event.
-    text += ((await readTextFile(file)) ?? "") + "\n";
+    const read = appendEvents(parsed.get(file) ?? null, (await readTextFile(file)) ?? "");
+    parsed.set(file, read);
+    events.push(...read.events);
   }
-  return parseEvents(text);
+  return events.sort((a, b) => a.time - b.time);
 }
 
 const holds = (root) => (pane) => pane.cwd === root || pane.cwd?.startsWith(`${root}/`);
@@ -112,8 +120,13 @@ export default class Watch extends View {
     this.polls = 0;
     this.sagaOpen = false;
     this.events = [];
-    // Log folders being watched, each with its repository root.
+    // Log folders being watched, each with { root }; the entry is replaced when a folder is
+    // watched again, so the watchers of an earlier entry stop.
     this.watched = new Map();
+    // Repositories whose log folder is being looked up.
+    this.finding = new Set();
+    // The last summary rendered, reused while the events, the task and the half minute match.
+    this.memo = null;
     // Each pane folder's repository root, or null outside one; looked up once per folder.
     this.roots = new Map();
     this.remote = false;
@@ -230,56 +243,116 @@ export default class Watch extends View {
   discover(cx) {
     if (!this.logs) return;
     const local = new Set(spaces().flatMap((s) => (s.machine ? [] : s.tabs.map((tab) => tab.id))));
-    for (const p of panes()) {
-      if (!p.cwd || !local.has(p.tab) || this.roots.has(p.cwd)) continue;
+    const open = panes().filter((p) => p.cwd && local.has(p.tab));
+    const cwds = new Set(open.map((p) => p.cwd));
+    // A folder no pane is in any more is forgotten, and looked up again if one returns.
+    for (const cwd of [...this.roots.keys()]) if (!cwds.has(cwd)) this.roots.delete(cwd);
+    for (const p of open) {
+      if (this.roots.has(p.cwd)) continue;
       const cwd = p.cwd;
       this.roots.set(cwd, null);
       cx.spawn(async () => {
         const root = await repoRoot(cwd);
+        if (!this.roots.has(cwd)) return;
         this.roots.set(cwd, root);
-        // Pane headers match a pane to its repository by this map, not by folder nesting.
-        if (root) setShared("halvard.repos", { ...(shared("halvard.repos") ?? {}), [cwd]: root });
+        this.share();
       });
     }
-    const watching = new Set(this.watched.values());
+    const watching = new Set([...this.watched.values()].map((w) => w.root));
     for (const root of new Set(this.roots.values())) {
-      if (!root || watching.has(root) || !panes().some(holds(root))) continue;
+      if (!root || watching.has(root) || this.finding.has(root) || !panes().some(holds(root))) continue;
+      this.finding.add(root);
       cx.spawn(async (cx) => {
-        const dir = await logDir(this.logs, root);
-        if (!dir || this.watched.has(dir)) return;
-        this.publish(root, await readLog(dir));
-        this.watch(cx, root, dir);
+        try {
+          const dir = await logDir(this.logs, root);
+          if (!dir || this.watched.has(dir)) return;
+          this.publish(root, await readLog(dir));
+          this.watch(cx, root, dir);
+        } finally {
+          this.finding.delete(root);
+        }
       });
     }
+    this.share();
   }
 
-  // One watcher per log folder, kept after focus moves on so the repository's pane headers
-  // stay current; it stops once no pane is open in the repository.
+  // Pane headers match a pane to its repository by "halvard.repos", not by folder nesting.
+  // Both shared maps keep only folders and repositories a pane is still in.
+  share() {
+    const repos = Object.fromEntries([...this.roots].filter(([, root]) => root));
+    if (JSON.stringify(repos) !== JSON.stringify(shared("halvard.repos") ?? {})) setShared("halvard.repos", repos);
+    const live = new Set([...Object.values(repos), this.root]);
+    const current = shared("halvard.status") ?? {};
+    const status = Object.fromEntries(Object.entries(current).filter(([root]) => live.has(root)));
+    if (Object.keys(status).length !== Object.keys(current).length) setShared("halvard.status", status);
+  }
+
+  // One watcher per log folder and per task folder in it, kept after focus moves on so the
+  // repository's pane headers stay current; they stop once no pane is open in the
+  // repository. A folder watch may not see changes to files in its subfolders, where most
+  // events land, so each task folder has its own; a change in any rereads the log, one read
+  // at a time.
   watch(cx, root, dir) {
     if (this.watched.has(dir)) return;
-    this.watched.set(dir, root);
-    cx.spawn(async (cx) => {
-      for (;;) {
-        try {
-          await watchFolder(dir);
-        } catch {
-          break;
-        }
-        if (dir !== this.dir && !panes().some(holds(root))) break;
-        const events = await readLog(dir);
-        this.publish(root, events);
-        if (dir === this.dir) {
-          this.events = events;
-          cx.notify();
-        }
+    const entry = { root };
+    this.watched.set(dir, entry);
+    const folders = new Set();
+    let reading = false;
+    let again = false;
+    const current = () => this.watched.get(dir) === entry;
+    const reread = async (cx) => {
+      if (reading) {
+        again = true;
+        return;
       }
-      this.watched.delete(dir);
+      reading = true;
+      try {
+        do {
+          again = false;
+          const events = await readLog(dir);
+          if (!current()) return;
+          this.publish(root, events);
+          if (dir === this.dir) {
+            this.events = events;
+            cx.notify();
+          }
+          for (const folder of await subfolders(dir)) follow(folder);
+        } while (again);
+      } finally {
+        reading = false;
+      }
+    };
+    const follow = (folder) => {
+      if (folders.has(folder)) return;
+      folders.add(folder);
+      cx.spawn(async (cx) => {
+        for (;;) {
+          try {
+            await watchFolder(folder);
+          } catch {
+            // The log folder itself is gone; a later lookup may watch it again.
+            if (folder === dir && current()) this.watched.delete(dir);
+            break;
+          }
+          if (!current()) break;
+          if (dir !== this.dir && !panes().some(holds(root))) {
+            this.watched.delete(dir);
+            break;
+          }
+          await reread(cx);
+        }
+        folders.delete(folder);
+      });
+    };
+    follow(dir);
+    cx.spawn(async () => {
+      for (const folder of await subfolders(dir)) follow(folder);
     });
   }
 
   publish(root, events) {
     const current = shared("halvard.status") ?? {};
-    const status = { ...current, [root]: summarize(events, Date.now(), null).branches };
+    const status = { ...current, [root]: verdicts(events) };
     if (JSON.stringify(status) !== JSON.stringify(current)) setShared("halvard.status", status);
   }
 
@@ -548,7 +621,7 @@ export default class Watch extends View {
     const settled = this.cwd === this.shown;
     // The task file decides the task, so the card and the runes always name the same one.
     const task = settled && this.taskFor === `${this.root}\n${branch}` ? this.task : null;
-    const s = summarize(this.events, Date.now(), task?.file.replace(/\.md$/, "") ?? null);
+    const s = this.summary(task?.file.replace(/\.md$/, "") ?? null);
     return v_flex()
       .id("halvard-watch")
       .size_full()
@@ -571,6 +644,17 @@ export default class Watch extends View {
             .when(Boolean(this.message), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(this.message ?? ""))),
         ),
       );
+  }
+
+  // Render runs on every focus change and hover; the summary changes only with the events,
+  // the task, and time, which moods and today's tallies follow to the half minute.
+  summary(task) {
+    const now = Date.now();
+    const key = `${task}\n${Math.floor(now / 30000)}`;
+    if (this.memo?.events !== this.events || this.memo.key !== key) {
+      this.memo = { events: this.events, key, value: summarize(this.events, now, task) };
+    }
+    return this.memo.value;
   }
 
   branch() {

@@ -16,8 +16,8 @@ import {
   singleLink,
 } from '../project.ts';
 import { projectHoldsData, protectedRoots, workspaceRoot } from '../config/paths.ts';
-import { existsSync, realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
 import { chain } from './shell.ts';
 
 const REBUILD = 're-read each file in the patch and rebuild the hunks from its current text';
@@ -443,22 +443,48 @@ function readerFiles([reader, ...args]: string[]) {
 
 // The files a shell command printed for certain: reader segments that ran, because no ||
 // or background & comes before them, whose success the command's own success proves,
-// because only && follows them and the command does not end in a background &, and whose
-// output was not sent to /dev/null. A command the guard's parser cannot read exactly
+// because only && follows them, or whose file is a readable regular file when ; or a
+// newline follows; the command must not end in a background & and the output must not be
+// sent to /dev/null. A command the guard's parser cannot read exactly
 // yields nothing.
-function shellReads(command: string) {
+function shellReads(command: string, cwd: string) {
   const parsed = chain(command);
   if (!parsed) return [];
   const { segments, operators, silenced } = parsed;
-  return segments.flatMap((segment, i) =>
-    SKILL_READERS.has(segment[0]!) &&
-    !silenced.has(i) &&
-    operators.slice(0, i).every((op) => op !== '||' && op !== '&') &&
-    operators.slice(i, -1).every((op) => op === '&&') &&
-    operators.at(-1) !== '&'
-      ? readerFiles(segment)
-      : [],
-  );
+  return segments.flatMap((segment, i) => {
+    if (
+      !SKILL_READERS.has(segment[0]!) ||
+      silenced.has(i) ||
+      operators.at(-1) === '&' ||
+      !operators.slice(0, i).every((op) => op !== '||' && op !== '&')
+    ) {
+      return [];
+    }
+    const following = operators.slice(i, -1);
+    if (following.every((op) => op === '&&')) return readerFiles(segment);
+    // After ; or a newline the next command runs whatever the reader's status, so the
+    // command's success proves nothing about it. A reader of a regular file it may read
+    // does not fail, so such a file counts; a missing or unreadable one does not. A
+    // relative path counts only while no earlier cd or pushd moved the shell.
+    if (!following.every((op) => op === '&&' || SEQUENCE.has(op))) return [];
+    const moved = segments.slice(0, i).some((s) => s[0] === 'cd' || s[0] === 'pushd');
+    return readerFiles(segment).filter((file) => readableFile(file, cwd, moved));
+  });
+}
+
+const SEQUENCE = new Set([';', '\n']);
+
+function readableFile(file: string, cwd: string, moved: boolean) {
+  // The parser drops quotes, so a ~ path may be literal; it never counts.
+  if (moved && !isAbsolute(file)) return false;
+  const path = resolve(cwd, file);
+  try {
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // The skills a tool call loads: Claude's Skill tool, or a read of a skill's SKILL.md
@@ -476,7 +502,7 @@ export function loadedSkills(payload: HookPayload): string[] {
   }
   if (['bash', 'Bash', 'exec_command', 'shell_command'].includes(name as string)) {
     const command = input.command ?? input.cmd;
-    if (typeof command === 'string') paths = shellReads(command);
+    if (typeof command === 'string') paths = shellReads(command, payload.cwd);
   }
   const names = paths.flatMap((path) => {
     const match = typeof path === 'string' ? path.match(SKILL_FILE) : null;

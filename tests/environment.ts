@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after } from 'node:test';
 
 // Personal preferences must not alter fixtures or packaged-install verification.
 const previous = process.env.HALVARD_HOME;
-const home = mkdtempSync(join(tmpdir(), 'workflow-suite-personal-'));
+const home = realpathSync(mkdtempSync(join(tmpdir(), 'workflow-suite-personal-')));
 
 process.env.HALVARD_HOME = home;
 
@@ -20,7 +20,7 @@ after(() => {
 
 // Task commands create team workspaces; keep them out of the real home directory.
 const previousWorkspace = process.env.HALVARD_WORKSPACE;
-const workspace = mkdtempSync(join(tmpdir(), 'workflow-suite-workspace-'));
+const workspace = realpathSync(mkdtempSync(join(tmpdir(), 'workflow-suite-workspace-')));
 
 process.env.HALVARD_WORKSPACE = workspace;
 
@@ -35,7 +35,7 @@ after(() => {
 
 // The data root holds config, workspace and factory folders; keep it out of the real home.
 const previousData = process.env.HALVARD_DATA;
-const data = mkdtempSync(join(tmpdir(), 'workflow-suite-data-'));
+const data = realpathSync(mkdtempSync(join(tmpdir(), 'workflow-suite-data-')));
 
 process.env.HALVARD_DATA = data;
 

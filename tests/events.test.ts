@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import test from 'node:test';
 import { handle } from '../core/runtime.ts';
+import { toHookPayload } from '../core/harnesses/index.ts';
 import { logRoot } from '../core/config/paths.ts';
 import { eventFile, readEvents, repoLogDirectory, writeEvent } from '../core/events.ts';
 import { startTask } from '../core/workflow/tasks.ts';
@@ -76,6 +77,152 @@ test('session starts are logged for the repository', async (t) => {
     events.map((event) => [event.kind, event.harness]),
     [['session', 'cursor']],
   );
+});
+
+test('skill loads are logged after the call, for every way a harness loads one', async (t) => {
+  const root = fixture(t);
+  const after = (harness: string, tool_name: string, tool_input: object, is_error = false) =>
+    handle(harness, {
+      cwd: root,
+      session_id: 's1',
+      hook_event_name: 'PostToolUse',
+      tool_name,
+      tool_input,
+      is_error,
+    });
+  await after('claude', 'Skill', { skill: 'halvard:halvard-review', args: 'x' });
+  await after('pi', 'read', { path: '/opt/halvard/skills/halvard-test/SKILL.md' });
+  await after('grok', 'Read', { target_file: '/opt/halvard/skills/halvard-debug/SKILL.md' });
+  await after('codex', 'exec_command', {
+    cmd: "sed -n '1,200p' /opt/halvard/skills/halvard-spec/SKILL.md",
+  });
+  await after('claude', 'Bash', {
+    command: 'cd /opt/halvard && cat skills/halvard-design/SKILL.md',
+  });
+  // A separator inside sed's quoted script does not split the command.
+  await after('codex', 'exec_command', {
+    cmd: "sed -n '1p;2p' /opt/halvard/skills/halvard-correct/SKILL.md",
+  });
+  // A failed load, a search or an echo that names a skill file and an ordinary read load nothing.
+  await after('claude', 'Skill', { skill: 'halvard-verify' }, true);
+  await after('codex', 'exec_command', {
+    cmd: 'grep -n gate /opt/halvard/skills/halvard/SKILL.md',
+  });
+  await after('codex', 'exec_command', { cmd: 'cat README.md; echo skills/halvard/SKILL.md' });
+  // A read whose failure the command hides, or one only a comment names, proves nothing.
+  await after('codex', 'exec_command', { cmd: 'cat missing/skills/halvard/SKILL.md || true' });
+  // A reader sent to the background reports a successful launch even when the read fails.
+  await after('codex', 'exec_command', { cmd: 'cat /missing/skills/halvard-test/SKILL.md &' });
+  // A reader skipped by ||, a sed that prints nothing and a zero count load nothing either.
+  await after('codex', 'exec_command', { cmd: 'true || cat /opt/halvard/skills/halvard/SKILL.md' });
+  await after('codex', 'exec_command', { cmd: "sed -n 'd' /opt/halvard/skills/halvard/SKILL.md" });
+  await after('codex', 'exec_command', { cmd: "sed '1p' /opt/halvard/skills/halvard/SKILL.md" });
+  await after('codex', 'exec_command', { cmd: 'head -n 0 /opt/halvard/skills/halvard/SKILL.md' });
+  await after('codex', 'exec_command', { cmd: 'tail -c0 /opt/halvard/skills/halvard/SKILL.md' });
+  // sed numbers lines across its files, so '1p' here prints only README.md's first line.
+  await after('codex', 'exec_command', {
+    cmd: "sed -n '1p' README.md /opt/halvard/skills/halvard/SKILL.md",
+  });
+  // A negative head count leaves out the last lines or bytes, all of a shorter file.
+  await after('codex', 'exec_command', {
+    cmd: 'head -n -999999 /opt/halvard/skills/halvard/SKILL.md',
+  });
+  await after('codex', 'exec_command', { cmd: 'head -c -5 /opt/halvard/skills/halvard/SKILL.md' });
+  // A range that starts after the first line may start past the end and print nothing.
+  await after('codex', 'exec_command', {
+    cmd: "sed -n '999999p' /opt/halvard/skills/halvard/SKILL.md",
+  });
+  await after('codex', 'exec_command', { cmd: 'tail -n +40 /opt/halvard/skills/halvard/SKILL.md' });
+  await after('codex', 'exec_command', {
+    cmd: 'bat -r 40:60 /opt/halvard/skills/halvard/SKILL.md',
+  });
+  // A skill path that is only an option's value, here nl's line separator, is not read.
+  await after('codex', 'exec_command', {
+    cmd: 'nl -s /opt/halvard/skills/halvard/SKILL.md README.md',
+  });
+  // Output sent to /dev/null never reaches the agent.
+  await after('codex', 'exec_command', {
+    cmd: 'cat /opt/halvard/skills/halvard/SKILL.md >/dev/null',
+  });
+  await after('codex', 'exec_command', {
+    cmd: 'cat /opt/halvard/skills/halvard/SKILL.md 1>/dev/null 2>&1',
+  });
+  // A help, version or zero-count long option prints something other than the file.
+  await after('codex', 'exec_command', { cmd: 'cat --help /opt/halvard/skills/halvard/SKILL.md' });
+  await after('codex', 'exec_command', {
+    cmd: 'head --lines=0 /opt/halvard/skills/halvard/SKILL.md',
+  });
+  await after('codex', 'exec_command', { cmd: 'bat -V /opt/halvard/skills/halvard/SKILL.md' });
+  await after('codex', 'exec_command', { cmd: 'cat /opt/halvard/skills/halvard/SKILL.md | head' });
+  await after('codex', 'exec_command', {
+    cmd: "sed -n '1p' README.md # skills/halvard/SKILL.md",
+  });
+  await after('claude', 'Read', { file_path: join(root, 'README.md') });
+  // Grok's search reaches the engine as Read; its query marks it as a search.
+  await handle(
+    'grok',
+    toHookPayload('grok', {
+      cwd: root,
+      sessionId: 's1',
+      hookEventName: 'post_tool_use',
+      toolName: 'grep_search',
+      toolInput: { query: 'gate', path: '/opt/halvard/skills/halvard/SKILL.md' },
+    }),
+  );
+  // Grok can deliver one call to several Halvard entries, with other calls in between; each
+  // call's load is logged once.
+  for (const [call, skill] of [
+    ['grok-call-1', 'halvard-benchmark'],
+    ['grok-call-2', 'halvard-bootstrap'],
+    ['grok-call-1', 'halvard-benchmark'],
+  ]) {
+    await handle(
+      'grok',
+      toHookPayload('grok', {
+        cwd: root,
+        sessionId: 's1',
+        hookEventName: 'post_tool_use',
+        toolName: 'read_file',
+        toolUseId: call,
+        toolInput: { target_file: `/opt/halvard/skills/${skill}/SKILL.md` },
+      }),
+    );
+  }
+  // Cursor's afterShellExecution has no exit status, so a read that may have failed is not counted.
+  await handle(
+    'cursor',
+    toHookPayload('cursor', {
+      cwd: root,
+      workspace_roots: [root],
+      conversation_id: 's1',
+      hook_event_name: 'afterShellExecution',
+      command: 'cat /opt/halvard/skills/halvard-retro/SKILL.md',
+      output: 'cat: /opt/halvard/skills/halvard-retro/SKILL.md: No such file or directory',
+    }),
+  );
+  // A PreToolUse is not a load yet.
+  await handle('claude', {
+    cwd: root,
+    session_id: 's1',
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Skill',
+    tool_input: { skill: 'halvard-handoff' },
+  });
+  const events = readEvents(eventFile(repoLogDirectory(root), null));
+  assert.deepEqual(
+    events.map((event) => [event.kind, event.harness, event.skill, event.branch]),
+    [
+      ['skill', 'claude', 'halvard-review', 'main'],
+      ['skill', 'pi', 'halvard-test', 'main'],
+      ['skill', 'grok', 'halvard-debug', 'main'],
+      ['skill', 'codex', 'halvard-spec', 'main'],
+      ['skill', 'claude', 'halvard-design', 'main'],
+      ['skill', 'codex', 'halvard-correct', 'main'],
+      ['skill', 'grok', 'halvard-benchmark', 'main'],
+      ['skill', 'grok', 'halvard-bootstrap', 'main'],
+    ],
+  );
+  assert.equal(events[0]!.session, sessionKey(root, 'claude', 's1'));
 });
 
 test('a task run logs its start, mode, gate and denials in the task log', async (t) => {

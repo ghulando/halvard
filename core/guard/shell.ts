@@ -23,6 +23,8 @@ function parse(text: string, comments = true) {
   let comment = false;
   // Output redirections to a literal path, by the segment that writes them.
   const redirects: { segment: number; path: string }[] = [];
+  // Segments whose standard output a discard redirection throws away.
+  const silenced = new Set<number>();
   let redirecting = false;
   let quoted = false;
   let orphan = false;
@@ -76,6 +78,7 @@ function parse(text: string, comments = true) {
     if (!started && /[12>]/.test(ch)) {
       const discard = text.slice(i, i + 12).match(DISCARD);
       if (discard) {
+        if (/^1?>/.test(discard[0])) silenced.add(segments.length);
         i += discard[0].length - 1;
         continue;
       }
@@ -125,16 +128,22 @@ function parse(text: string, comments = true) {
   }
   if (quote) return null;
   pushSegment();
-  return segments.length && !orphan ? { segments, operators, glob, comment, redirects } : null;
-}
-
-// Callers that act on exact words get no comment or redirect leniency.
-export function commands(text: string) {
-  const parsed = parse(text);
-  return parsed && !parsed.glob && !parsed.comment && !parsed.redirects.length
-    ? parsed.segments
+  return segments.length && !orphan
+    ? { segments, operators, glob, comment, redirects, silenced }
     : null;
 }
+
+// Callers that act on exact words get no comment or redirect leniency. Operators[i] joins
+// segment i to the next: ';', '&&', '||', '|', '&' or a newline; '' after the last.
+// Silenced holds the segments whose standard output goes to /dev/null.
+export function chain(text: string) {
+  const parsed = parse(text);
+  return parsed && !parsed.glob && !parsed.comment && !parsed.redirects.length
+    ? { segments: parsed.segments, operators: parsed.operators, silenced: parsed.silenced }
+    : null;
+}
+
+export const commands = (text: string) => chain(text)?.segments ?? null;
 
 const SHIPPING_GIT = new Set(['commit', 'merge', 'push']);
 const SHIPPING_WORDS = new Set(['publish', 'push', 'deploy', 'release', 'upload']);

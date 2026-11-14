@@ -199,6 +199,8 @@ export interface HookPayload {
   permission_mode?: string | undefined;
   prompt?: string | undefined;
   is_error?: boolean | undefined;
+  // The host reports no failure for this call, so a PostToolUse may follow one that failed.
+  outcome_unknown?: true | undefined;
 }
 
 export interface FileChange {
@@ -333,6 +335,9 @@ export interface WorkflowState {
   // The tool call that spent the last approval. Grok can run several Halvard entries
   // for one call; the others see the same call and do not ask again.
   consumed?: { id: string; call: string } | null;
+  // The latest tool calls whose skill loads were logged, so a duplicate delivery logs none
+  // even when other calls arrive in between.
+  skillCalls?: string[];
   gate: string | null;
   first?: ReviewRecord;
   second?: ReviewRecord;

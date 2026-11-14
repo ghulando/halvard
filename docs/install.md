@@ -83,6 +83,17 @@ The Cursor CLI (`cursor-agent`) has no plugin command. Use the install script. I
 
 Start a new session to check the install. A working install shows "Halvard is active" in the startup context.
 
+### Herdr App layout
+
+The `halvard` layout for [Herdr App](https://herdr.dev) adds a watchtower panel that narrates the focused repository's run log, pane headers with each pane's team role and latest gate and review, and a button that opens the team's hall tab. It is not in the npm package. From a clone of this repository, with Herdr App started at least once:
+
+```sh
+sh scripts/install-herdr.sh
+herdr-app do layout.switch --name halvard
+```
+
+The script copies the layout, the theme and the `halvard-watch` and `halvard-session` mods into `$HERDR_APP_HOME` (default `~/.config/herdr-app`) and runs `herdr-app check` on each mod. It stops without copying anything if a file of the same name there differs; `--force` replaces such files. Run it again to update. `ctrl-shift-l` switches back to your previous layout. "Summon the hall" appears in a repository with a saved team (`halvard team set`). `herdr-app/RECIPE.md` describes the layout for building it from scratch.
+
 ## Update
 
 Run the install script again, or by hand:

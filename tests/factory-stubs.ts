@@ -1,6 +1,14 @@
 import type { TestContext } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -61,6 +69,8 @@ if (a === 'issue' && b === 'list') {
 
 // A docker CLI stand-in: docker run executes the command here, in the -w folder, with only
 // PATH, HOME and the variables named by -e, and logs the arguments. docker rm does nothing.
+// HOME is STUB_DOCKER_HOME, because a container has its own home; the host's would take
+// the run log and other Halvard data out of the suite's folders.
 const dockerStub = `#!${process.execPath}
 const fs = require('fs');
 const args = process.argv.slice(2);
@@ -68,7 +78,7 @@ if (process.env.STUB_DOCKER_LOG) fs.appendFileSync(process.env.STUB_DOCKER_LOG, 
 if (args[0] === 'image') process.exit(args.at(-1).startsWith('missing') ? 1 : (console.log('sha256:stub'), 0));
 if (args[0] !== 'run') process.exit(0);
 if (process.env.STUB_DOCKER_FAIL && args.includes(process.env.STUB_DOCKER_FAIL)) process.exit(125);
-const env = { PATH: process.env.PATH, HOME: process.env.HOME };
+const env = { PATH: process.env.PATH, HOME: process.env.STUB_DOCKER_HOME };
 let cwd = process.cwd();
 let i = 1;
 const valued = new Set(['--name', '--user', '--cap-drop', '--security-opt', '--pids-limit', '--memory', '--cpus', '--network', '-w', '-v', '--mount', '-e']);
@@ -297,6 +307,8 @@ process.stdout.write(JSON.stringify({ result: 'Done.\\nSTATUS: READY', total_cos
   chmodSync(join(dir, 'docker'), 0o755);
   const dockerLog = join(dir, 'docker.jsonl');
   writeFileSync(dockerLog, '');
+  const dockerHome = join(dir, 'container-home');
+  mkdirSync(dockerHome);
   const state = join(dir, 'gh-state.json');
   writeFileSync(
     state,
@@ -313,6 +325,7 @@ process.stdout.write(JSON.stringify({ result: 'Done.\\nSTATUS: READY', total_cos
     STUB_LOG: log,
     STUB_GH_STATE: state,
     STUB_DOCKER_LOG: dockerLog,
+    STUB_DOCKER_HOME: dockerHome,
     HALVARD_FACTORY_HOME: home,
     GH_TOKEN: 'secret-test-token',
   });

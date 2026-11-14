@@ -225,6 +225,44 @@ test('skill loads are logged after the call, for every way a harness loads one',
   assert.equal(events[0]!.session, sessionKey(root, 'claude', 's1'));
 });
 
+test('a skill read followed by ; or a newline counts only when its file is readable', async (t) => {
+  const root = fixture(t);
+  for (const skill of ['halvard-debug', 'halvard-spec', 'halvard-test', 'halvard-retro']) {
+    mkdirSync(join(root, 'skills', skill), { recursive: true });
+    writeFileSync(join(root, 'skills', skill, 'SKILL.md'), `# ${skill}\n`);
+  }
+  mkdirSync(join(root, 'skills', 'halvard-write', 'SKILL.md'), { recursive: true });
+  const after = (cmd: string) =>
+    handle('codex', {
+      cwd: root,
+      session_id: 's1',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'exec_command',
+      tool_input: { cmd },
+    });
+  // A successful read of an existing file, then ; or a newline and more commands.
+  await after(`cat ${join(root, 'skills/halvard-debug/SKILL.md')}; cat .halvard.json`);
+  await after("sed -n '1,200p' skills/halvard-spec/SKILL.md\ncat .halvard.json");
+  await after('cat skills/halvard-test/SKILL.md && cat .halvard.json; ls');
+  // A read that failed is hidden by the ; that follows it, so it does not count: a missing
+  // file, a folder, a relative path after cd, or a reader skipped by ||.
+  await after('cat /missing/skills/halvard-handoff/SKILL.md; true');
+  await after('cat skills/halvard-write/SKILL.md; true');
+  await after('cd /tmp; cat skills/halvard-retro/SKILL.md; true');
+  await after('false || cat skills/halvard-retro/SKILL.md; true');
+  // A pipe after the reader still proves nothing about the read.
+  await after('cat skills/halvard-retro/SKILL.md | head; true');
+  const events = readEvents(eventFile(repoLogDirectory(root), null));
+  assert.deepEqual(
+    events.map((event) => [event.kind, event.skill]),
+    [
+      ['skill', 'halvard-debug'],
+      ['skill', 'halvard-spec'],
+      ['skill', 'halvard-test'],
+    ],
+  );
+});
+
 test('a task run logs its start, mode, gate and denials in the task log', async (t) => {
   const root = fixture(
     t,

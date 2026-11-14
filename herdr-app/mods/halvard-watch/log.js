@@ -53,15 +53,7 @@ export function summarize(events, now, task) {
     reReviews: count((e) => e.kind === "review" && (e.round ?? 1) > 1),
   };
 
-  // The latest gate and review per branch, for the pane headers. Branch names are keys, so
-  // the object has no prototype: a branch called __proto__ or constructor is just a name.
-  const branches = Object.create(null);
-  for (const e of events) {
-    if (!e.branch || (e.kind !== "gate" && e.kind !== "review")) continue;
-    const entry = (branches[e.branch] ??= {});
-    if (e.kind === "gate") entry.gate = { passed: e.passed === true, at: e.time };
-    else entry.review = { verdict: e.verdict, round: e.round ?? null, reviewer: e.reviewer ?? null, at: e.time };
-  }
+  const branches = verdicts(events);
 
   // The runes cast on this branch's task, else today; most cast first.
   const tally = new Map();
@@ -73,6 +65,19 @@ export function summarize(events, now, task) {
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 
   return { mood, open, streak, score, branches, task, skills, feed: events.slice(-FEED).map(narrate) };
+}
+
+// The latest gate and review per branch, for the pane headers. Branch names are keys, so the
+// object has no prototype: a branch called __proto__ or constructor is just a name.
+export function verdicts(events) {
+  const branches = Object.create(null);
+  for (const e of events) {
+    if (!e.branch || (e.kind !== "gate" && e.kind !== "review")) continue;
+    const entry = (branches[e.branch] ??= {});
+    if (e.kind === "gate") entry.gate = { passed: e.passed === true, at: e.time };
+    else entry.review = { verdict: e.verdict, round: e.round ?? null, reviewer: e.reviewer ?? null, at: e.time };
+  }
+  return branches;
 }
 
 // tone: "good", "bad", "warn", "info" or "saga", for the line's color.
@@ -115,4 +120,19 @@ export function narrate(e) {
     default:
       return line(e.kind.slice(0, 5), "info", e.kind);
   }
+}
+
+// A log file's events, parsing only what was appended since `before` (this function's last
+// result for the file, or null). Only text up to the last newline counts: Halvard writes each
+// line whole with its newline, so a line without one is still being written. A file that
+// shrank or whose last read lines changed was rewritten, and is parsed again.
+const SAMPLE = 512;
+export function appendEvents(before, text) {
+  const end = text.lastIndexOf("\n") + 1;
+  const tail = text.slice(Math.max(0, end - SAMPLE), end);
+  const kept =
+    before && end >= before.end && text.slice(Math.max(0, before.end - SAMPLE), before.end) === before.tail;
+  if (kept && end === before.end) return before;
+  const events = kept ? before.events.concat(parseEvents(text.slice(before.end, end))) : parseEvents(text.slice(0, end));
+  return { end, tail, events };
 }

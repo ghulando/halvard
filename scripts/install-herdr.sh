@@ -5,15 +5,18 @@
 #
 #   sh scripts/install-herdr.sh           stops before copying if a file there differs
 #   sh scripts/install-herdr.sh --force   replaces files that differ
+#   sh scripts/install-herdr.sh --remove  removes the files that match this copy
 
 set -e
 
 force=
+remove=
 case "$#:${1-}" in
   0:) ;;
   1:--force) force=1 ;;
+  1:--remove) remove=1 ;;
   *)
-    echo "usage: install-herdr.sh [--force]" >&2
+    echo "usage: install-herdr.sh [--force | --remove]" >&2
     exit 2
     ;;
 esac
@@ -62,6 +65,31 @@ for file in $files; do
   $target"
   fi
 done
+# Removal deletes only regular files that match this copy, so a file someone changed stays;
+# then the mod folders, if nothing else is left in them.
+if [ -n "$remove" ]; then
+  removed=0
+  for file in $files; do
+    target=$home/$file
+    if [ -f "$target" ] && [ ! -L "$target" ] && folders_clear "$target" &&
+      cmp -s "$source/$file" "$target"; then
+      rm "$target"
+      removed=$((removed + 1))
+    fi
+  done
+  for mod in halvard-watch halvard-session; do
+    if [ -d "$home/mods/$mod" ] && [ ! -L "$home/mods/$mod" ]; then
+      rmdir "$home/mods/$mod" 2>/dev/null || true
+    fi
+  done
+  echo "Removed $removed of $(echo $files | wc -w | tr -d ' ') files from $home."
+  if [ -n "$differ$blocked" ]; then
+    echo "These differ from this copy and were left in place:$differ$blocked" >&2
+  fi
+  echo "If the halvard layout is active, switch away first: ctrl-shift-l."
+  exit 0
+fi
+
 if [ -n "$blocked" ]; then
   echo "Something other than a file is in the way; move it and run this again:$blocked" >&2
   exit 1

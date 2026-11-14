@@ -92,7 +92,7 @@ sh scripts/install-herdr.sh
 herdr-app do layout.switch --name halvard
 ```
 
-The script copies the layout, the theme and the `halvard-watch` and `halvard-session` mods into `$HERDR_APP_HOME` (default `~/.config/herdr-app`) and runs `herdr-app check` on each mod. It stops without copying anything if a file of the same name there differs; `--force` replaces such files. Run it again to update. `ctrl-shift-l` switches back to your previous layout. "Summon the hall" appears in a repository with a saved team (`halvard team set`). `herdr-app/RECIPE.md` describes the layout for building it from scratch.
+The script copies the layout, the theme and the `halvard-watch` and `halvard-session` mods into `$HERDR_APP_HOME` (default `~/.config/herdr-app`) and runs `herdr-app check` on each mod. It stops without copying anything if a file of the same name there differs; `--force` replaces such files. Run it again to update. `ctrl-shift-l` switches back to your previous layout; after switching away, `sh scripts/install-herdr.sh --remove` deletes the files that still match this copy and leaves any you changed. "Summon the hall" appears in a repository with a saved team (`halvard team set`). `herdr-app/RECIPE.md` describes the layout for building it from scratch.
 
 ## Update
 

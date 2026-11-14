@@ -59,6 +59,7 @@ const installed = [
   'mods/halvard-watch/log.js',
   'mods/halvard-watch/task.js',
   'mods/halvard-watch/summon.js',
+  'mods/halvard-watch/rules.js',
   'mods/halvard-watch/mod.json',
   'mods/halvard-session/main.js',
   'mods/halvard-session/mod.json',
@@ -77,7 +78,7 @@ test('install-herdr copies the layout, theme and mods and checks each mod', { sk
     `herdr-app check ${app}/mods/halvard-watch`,
     `herdr-app check ${app}/mods/halvard-session`,
   ]);
-  assert.match(result.stdout, /Copied 10 of 10 files/);
+  assert.match(result.stdout, /Copied 11 of 11 files/);
   assert.match(result.stdout, /layout\.switch --name halvard/);
 });
 
@@ -86,7 +87,7 @@ test('install-herdr run again copies nothing that is already the same', { skip }
   assert.equal(run().status, 0);
   const again = run();
   assert.equal(again.status, 0, again.stderr);
-  assert.match(again.stdout, /Copied 0 of 10 files/);
+  assert.match(again.stdout, /Copied 0 of 11 files/);
 });
 
 test(
@@ -166,18 +167,22 @@ test('install-herdr takes a home with a trailing slash or a relative path', { sk
     const result = run();
     assert.equal(result.status, 0, `${homeValue(app)}: ${result.stderr}`);
     assert.equal(existsSync(join(app, 'layouts/halvard.json')), true);
-    assert.match(result.stdout, /Copied 10 of 10 files/);
+    assert.match(result.stdout, /Copied 11 of 11 files/);
   }
 });
 
-test('install-herdr needs the Herdr App home and accepts only --force', { skip }, (t) => {
-  const missing = setup(t, { home: false }).run();
-  assert.equal(missing.status, 1);
-  assert.match(missing.stderr, /No Herdr App home/);
-  const usage = setup(t).run('--switch');
-  assert.equal(usage.status, 2);
-  assert.match(usage.stderr, /usage: install-herdr\.sh \[--force\]/);
-});
+test(
+  'install-herdr needs the Herdr App home and accepts only --force or --remove',
+  { skip },
+  (t) => {
+    const missing = setup(t, { home: false }).run();
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /No Herdr App home/);
+    const usage = setup(t).run('--switch');
+    assert.equal(usage.status, 2);
+    assert.match(usage.stderr, /usage: install-herdr\.sh \[--force \| --remove\]/);
+  },
+);
 
 test(
   'install-herdr installs without herdr-app on PATH and says the mods were not checked',
@@ -188,3 +193,33 @@ test(
     assert.match(result.stdout, /herdr-app is not on PATH; the mods were not checked/);
   },
 );
+
+test('install-herdr --remove deletes only the files that match this copy', { skip }, (t) => {
+  const { app, run } = setup(t);
+  assert.equal(run().status, 0);
+  writeFileSync(join(app, 'themes/halvard.json'), '{"changed":"by hand"}\n');
+  writeFileSync(join(app, 'mods/halvard-session/notes.txt'), 'theirs\n');
+  const removed = run('--remove');
+  assert.equal(removed.status, 0, removed.stderr);
+  assert.match(removed.stdout, /Removed 10 of 11 files/);
+  assert.match(removed.stderr, /themes\/halvard\.json/);
+  assert.equal(readFileSync(join(app, 'themes/halvard.json'), 'utf8'), '{"changed":"by hand"}\n');
+  assert.equal(existsSync(join(app, 'layouts/halvard.json')), false);
+  // A mod folder with someone else's file stays; an emptied one goes.
+  assert.equal(existsSync(join(app, 'mods/halvard-session/notes.txt')), true);
+  assert.equal(existsSync(join(app, 'mods/halvard-session/main.js')), false);
+  assert.equal(existsSync(join(app, 'mods/halvard-watch')), false);
+  // Only the install's two checks: removal checks nothing.
+  assert.equal(removed.calls.length, 2);
+});
+
+test('install-herdr --remove never follows a link', { skip }, (t) => {
+  const { dir, app, run } = setup(t);
+  const outside = join(dir, 'outside');
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'halvard.json'), readFileSync(join(source, 'layouts/halvard.json')));
+  symlinkSync(outside, join(app, 'layouts'));
+  const result = run('--remove');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(join(outside, 'halvard.json')), true);
+});

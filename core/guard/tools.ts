@@ -18,6 +18,7 @@ import {
 import { projectHoldsData, protectedRoots, workspaceRoot } from '../config/paths.ts';
 import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { chain } from './shell.ts';
 
 const REBUILD = 're-read each file in the patch and rebuild the hunks from its current text';
 
@@ -348,6 +349,140 @@ export function normalize(project: Project, payload: HookPayload): Action {
     return { kind: 'read' };
   }
   return { kind: 'unknown' };
+}
+
+const SKILL_FILE = /(?:^|\/)skills\/([a-z0-9]+(?:-[a-z0-9]+)*)\/SKILL\.md$/;
+// Codex loads a skill by printing its file; a search, an echo or a comment that only names
+// one loads nothing, so only a reader's file operands count.
+const SKILL_READERS = new Set(['cat', 'sed', 'head', 'tail', 'nl', 'bat', 'less']);
+// Reader options whose value is the next word, or the rest of the same word.
+const VALUE_OPTIONS: Record<string, string[]> = {
+  head: ['-n', '-c'],
+  tail: ['-n', '-c'],
+  nl: ['-b', '-d', '-f', '-h', '-i', '-l', '-n', '-s', '-v', '-w'],
+  bat: ['-r', '--line-range', '-l', '--language'],
+};
+// The short flags a reader may take and still print its files. Any other short option,
+// help and version among them, may print something else, so the reader counts for none.
+const SHORT_FLAGS: Record<string, RegExp> = {
+  cat: /^-[benstuvAET]+$/,
+  head: /^-(?:[qv]+|\d+)$/,
+  tail: /^-(?:[qv]+|\d+)$/,
+  bat: /^-[pnAP]+$/,
+};
+// A zero count: head -n 0, head -0, tail -c0, head --lines=0 and the like print nothing.
+const ZERO_COUNT = /^(?:-[nc]?|--(?:lines|bytes)=)?0+$/;
+// The long options a reader may take and still print its files. Any other, --help and
+// --version among them, may print something else instead.
+const LONG_OPTIONS: Record<string, RegExp> = {
+  head: /^--(?:lines|bytes)=\d+$/,
+  tail: /^--(?:lines|bytes)=\d+$/,
+  bat: /^--(?:line-range=\S+|plain|paging=never|style=\S+|color=\S+)$/,
+};
+// sed prints a file for certain only as sed -n '<line or range>p' <file>, or several such
+// prints joined by ;, one of them starting at the first or last line, which every file
+// that is not empty has. A range that starts further in can start past the end.
+const SED_PRINT = /^(?:(\d+|\$)(?:,(?:\d+|\$))?)?p$/;
+function sedPrints(script: string) {
+  const prints = script.split(';').map((command) => command.match(SED_PRINT));
+  return prints.every(Boolean) && prints.some((print) => [undefined, '1', '$'].includes(print![1]));
+}
+
+// A range that starts after the first line may start past the end of the file and print
+// nothing: tail -n +40, bat -r 40:60. So may a negative head count, which leaves out the
+// last lines: head -n -40. A plain head or tail count and bat from line 1 do not.
+function startsLate(reader: string, option: string, value: string) {
+  if (reader === 'head') return value.startsWith('-');
+  if (reader === 'tail') return /^\+\d+$/.test(value) && Number(value.slice(1)) > 1;
+  if (reader === 'bat' && (option === '-r' || option === '--line-range')) {
+    return !/^(?:1|1?:\d*)$/.test(value);
+  }
+  return false;
+}
+const SED_OPTIONS = new Set(['-n', '-E', '-r']);
+const READ_PATHS = ['file_path', 'path', 'target_file', 'filePath', 'file'];
+// Grok and Cursor searches reach the engine as Read; their query fields mark them.
+const SEARCH_FIELDS = ['query', 'pattern', 'regex', 'glob_pattern', 'include_pattern'];
+
+// The files a reader prints: words after it that are not options or option values. A sed
+// other than a plain line print, a zero count, a range that may start past the end or an
+// option outside the reader's known ones prints none of its files.
+function readerFiles([reader, ...args]: string[]) {
+  const option = (arg: string) => arg.startsWith('-') && arg !== '-';
+  if (reader === 'sed') {
+    const options = args.filter(option);
+    const [script, ...files] = args.filter((arg) => !option(arg));
+    // sed numbers lines across all its files, so a print counts only for a single file.
+    const printing =
+      files.length === 1 &&
+      options.includes('-n') &&
+      options.every((arg) => SED_OPTIONS.has(arg)) &&
+      sedPrints(script ?? '');
+    return printing ? files : [];
+  }
+  const valued = VALUE_OPTIONS[reader!] ?? [];
+  const files: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (valued.includes(arg)) {
+      const value = args[++i] ?? '';
+      if (ZERO_COUNT.test(value) || startsLate(reader!, arg, value)) return [];
+    } else if (arg.startsWith('--')) {
+      const [name, value = ''] = arg.split('=');
+      if (!LONG_OPTIONS[reader!]?.test(arg) || ZERO_COUNT.test(arg)) return [];
+      if (startsLate(reader!, name!, value)) return [];
+    } else if (option(arg)) {
+      if (valued.length && ZERO_COUNT.test(arg)) return [];
+      const attached = valued.some((name) => name.length === 2 && arg.startsWith(name));
+      if (!attached && !SHORT_FLAGS[reader!]?.test(arg)) return [];
+      if (attached && startsLate(reader!, arg.slice(0, 2), arg.slice(2))) return [];
+    } else files.push(arg);
+  }
+  return files;
+}
+
+// The files a shell command printed for certain: reader segments that ran, because no ||
+// or background & comes before them, whose success the command's own success proves,
+// because only && follows them and the command does not end in a background &, and whose
+// output was not sent to /dev/null. A command the guard's parser cannot read exactly
+// yields nothing.
+function shellReads(command: string) {
+  const parsed = chain(command);
+  if (!parsed) return [];
+  const { segments, operators, silenced } = parsed;
+  return segments.flatMap((segment, i) =>
+    SKILL_READERS.has(segment[0]!) &&
+    !silenced.has(i) &&
+    operators.slice(0, i).every((op) => op !== '||' && op !== '&') &&
+    operators.slice(i, -1).every((op) => op === '&&') &&
+    operators.at(-1) !== '&'
+      ? readerFiles(segment)
+      : [],
+  );
+}
+
+// The skills a tool call loads: Claude's Skill tool, or a read of a skill's SKILL.md
+// through a file tool or a shell reader.
+export function loadedSkills(payload: HookPayload): string[] {
+  const name = payload.tool_name;
+  const input = payload.tool_input;
+  if (!input || typeof input !== 'object') return [];
+  if (name === 'Skill') {
+    return typeof input.skill === 'string' && input.skill ? [input.skill.split(':').pop()!] : [];
+  }
+  let paths: unknown[] = [];
+  if (['read', 'Read'].includes(name as string) && !SEARCH_FIELDS.some((key) => key in input)) {
+    paths = READ_PATHS.map((key) => input[key]);
+  }
+  if (['bash', 'Bash', 'exec_command', 'shell_command'].includes(name as string)) {
+    const command = input.command ?? input.cmd;
+    if (typeof command === 'string') paths = shellReads(command);
+  }
+  const names = paths.flatMap((path) => {
+    const match = typeof path === 'string' ? path.match(SKILL_FILE) : null;
+    return match ? [match[1]!] : [];
+  });
+  return [...new Set(names)];
 }
 
 function resolveDirectory(root: string, cwd: string, path: unknown) {

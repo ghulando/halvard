@@ -10,8 +10,11 @@ import { fileURLToPath } from 'node:url';
 const source = fileURLToPath(new URL('../', import.meta.url));
 const temporary = mkdtempSync(join(tmpdir(), 'halvard-packed-'));
 const previous = process.env.HALVARD_HOME;
+const previousData = process.env.HALVARD_DATA;
 
 process.env.HALVARD_HOME = join(temporary, 'personal');
+// The packed copy's hooks write a run log; keep it out of the real data folder.
+process.env.HALVARD_DATA = join(temporary, 'data');
 
 const metadata: unknown = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8'));
 const expected = (metadata as PackageMetadata).version;
@@ -185,6 +188,11 @@ try {
     delete process.env.HALVARD_HOME;
   } else {
     process.env.HALVARD_HOME = previous;
+  }
+  if (previousData === undefined) {
+    delete process.env.HALVARD_DATA;
+  } else {
+    process.env.HALVARD_DATA = previousData;
   }
   rmSync(temporary, { recursive: true, force: true });
 }

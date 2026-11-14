@@ -29,7 +29,7 @@ import {
   recordOutcome,
   short,
 } from './approval.ts';
-import { normalize } from './guard/tools.ts';
+import { loadedSkills, normalize } from './guard/tools.ts';
 import { HOOK_BUDGET, digest, fingerprint, sessionKey, withState } from './state.ts';
 import { hasReview } from './workflow/review.ts';
 import { evaluatePolicy } from './guard/policy.ts';
@@ -238,11 +238,13 @@ const UNATTENDED =
 // Denials from a repository's own extensions; their reasons are the extension's text, so
 // the log names only where they came from.
 const EXTENSION_DENIALS = new WeakSet<HookResult>();
+// Tool call ids kept per session to drop duplicate skill-load deliveries.
+const SKILL_CALLS = 50;
 // Log fields for an approval request: digests only.
 const ASKS = new WeakMap<HookResult, Record<string, unknown>>();
 
 // Decides, then records what the run log keeps: session starts, denials, approval
-// requests and approvals. Logging never changes the decision.
+// requests, approvals and skill loads. Logging never changes the decision.
 export async function handle(harness: string | undefined, raw: unknown): Promise<HookResult> {
   const payload = raw as HookPayload;
   let result: HookResult;
@@ -291,6 +293,32 @@ export async function handle(harness: string | undefined, raw: unknown): Promise
           : {}),
       });
     } catch {}
+  }
+  // A skill counts once its load ran; a denied call never reaches PostToolUse, and a call
+  // whose host cannot say it succeeded does not count.
+  if (event === 'PostToolUse' && !payload.is_error && !payload.outcome_unknown) {
+    const skills = loadedSkills(payload);
+    if (skills.length) {
+      try {
+        const project = loadProject(payload.cwd);
+        const session = sessionKey(project.root, harness!, payload.session_id);
+        // Grok can deliver one call to several Halvard entries; only the first logs it.
+        const call = typeof payload.tool_use_id === 'string' ? payload.tool_use_id : '';
+        const first =
+          !call ||
+          (await withState(project.root, session, (state) => {
+            const seen = state.skillCalls ?? [];
+            if (seen.includes(call)) return false;
+            // Duplicates arrive within moments of each other, so the last few calls suffice.
+            state.skillCalls = [...seen, call].slice(-SKILL_CALLS);
+            return true;
+          }));
+        if (first) {
+          for (const skill of skills)
+            logEvent(project, 'skill', { harness: harness!, session, skill });
+        }
+      } catch {}
+    }
   }
   return result;
 }

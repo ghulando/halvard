@@ -6,6 +6,7 @@
     "npm run format:check && npm test && npm run verify-install && npm pack --dry-run"
   ],
   "workflow": {
+    "reviewExclude": ["herdr-app/preview.png"],
     "reviewContext": [
       "core/**",
       "adapters/**",

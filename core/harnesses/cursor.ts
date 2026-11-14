@@ -30,6 +30,10 @@ function cursorPayload(raw: Raw): HookPayload | null {
           raw.hook_event_name === 'beforeShellExecution' ? 'PreToolUse' : 'PostToolUse',
         tool_name: 'Bash',
         tool_input: shellInput(raw),
+        // afterShellExecution sends the command's output but no exit status.
+        ...(raw.hook_event_name === 'afterShellExecution'
+          ? { outcome_unknown: true as const }
+          : {}),
       };
     case 'preToolUse':
     case 'postToolUse': {

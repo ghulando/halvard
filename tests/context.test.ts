@@ -77,6 +77,18 @@ test('startup context stays inside the native preview and points to the halvard 
   assert.doesNotMatch(context!, /Adapted from Pstack poteto-mode/);
 });
 
+test('only Codex startup context names the approval dialog tool', async (t) => {
+  const root = fixture(t);
+  assert.doesNotMatch(
+    (await call(root, 'claude', 'SessionStart')).context!,
+    /halvard_request_approval/,
+  );
+  assert.match(
+    (await call(root, 'codex', 'SessionStart')).context!,
+    /Call the halvard_request_approval tool with the request id/,
+  );
+});
+
 test('startup context prints the session review command only when review is required', async (t) => {
   const runner = quote(resolve(pluginRoot, 'bin/halvard.ts'));
   assert.doesNotMatch(
